@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Confirm Remove</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f7fb;
+        color: #162033;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+      main {
+        width: min(520px, calc(100vw - 32px));
+        background: #ffffff;
+        border: 1px solid #dfe5ef;
+        border-radius: 8px;
+        padding: 28px;
+        box-shadow: 0 18px 45px rgba(30, 41, 59, 0.12);
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 24px;
+      }
+      p {
+        color: #526074;
+        line-height: 1.5;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: 130px 1fr;
+        gap: 8px 12px;
+        margin: 20px 0;
+      }
+      dt {
+        color: #526074;
+      }
+      dd {
+        margin: 0;
+        font-weight: 650;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      button,
+      a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        border-radius: 6px;
+        padding: 0 14px;
+        font: inherit;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      button {
+        border: 1px solid #de9b93;
+        background: #fff1ef;
+        color: #9f2d20;
+        font-weight: 700;
+      }
+      a {
+        border: 1px solid #becada;
+        background: #ffffff;
+        color: #1f2b3d;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Confirm Remove</h1>
+      <p>This will remove the user from the content channel using Telegram ban/unban and mark them inactive.</p>
+      <dl>
+        <dt>Telegram ID</dt>
+        <dd>{{ user.telegram_id }}</dd>
+        <dt>Username</dt>
+        <dd>{% if user.username %}@{{ user.username }}{% else %}-{% endif %}</dd>
+        <dt>First Name</dt>
+        <dd>{{ user.first_name or "-" }}</dd>
+        <dt>Status</dt>
+        <dd>{{ user.status or "-" }}</dd>
+      </dl>
+      <div class="actions">
+        <form method="post" action="/dashboard/users/{{ user.telegram_id }}/remove/confirm?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+          <button type="submit">Confirm Remove</button>
+        </form>
+        <a href="/dashboard?filter={{ active_filter }}&search={{ search }}&page={{ page }}">Cancel</a>
+      </div>
+    </main>
+  </body>
+</html>

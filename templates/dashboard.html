@@ -1,1 +1,526 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Renewal Dashboard</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f7fb;
+        color: #162033;
+      }
+      body {
+        margin: 0;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 20px 28px;
+        background: #ffffff;
+        border-bottom: 1px solid #dfe5ef;
+      }
+      h1 {
+        margin: 0;
+        font-size: 24px;
+      }
+      main {
+        padding: 22px 28px 40px;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+      .toolbar-left {
+        display: grid;
+        gap: 12px;
+      }
+      .filters {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .search {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .search input,
+      .date-input {
+        min-height: 34px;
+        border: 1px solid #becada;
+        border-radius: 6px;
+        padding: 0 10px;
+        font: inherit;
+        font-size: 14px;
+      }
+      .search input {
+        width: min(360px, 100%);
+      }
+      a,
+      button {
+        font: inherit;
+      }
+      .filter {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 0 12px;
+        border-radius: 6px;
+        border: 1px solid #becada;
+        color: #1f2b3d;
+        background: #ffffff;
+        text-decoration: none;
+        font-size: 14px;
+      }
+      .filter.active {
+        border-color: #176b54;
+        background: #e8f5f0;
+        color: #0f513f;
+        font-weight: 700;
+      }
+      .notice,
+      .error,
+      .invite {
+        margin: 0 0 14px;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+      .notice {
+        border: 1px solid #abd8c5;
+        background: #ecfbf4;
+        color: #11553f;
+      }
+      .error {
+        border: 1px solid #f3b5ae;
+        background: #fff1ef;
+        color: #9f2d20;
+      }
+      .invite {
+        border: 1px solid #b8c9f3;
+        background: #eef4ff;
+        color: #1d3f87;
+        overflow-wrap: anywhere;
+      }
+      .invite-cell {
+        display: inline-block;
+        max-width: 220px;
+        overflow-wrap: anywhere;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        background: #ffffff;
+        border: 1px solid #dfe5ef;
+        border-radius: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 1260px;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        border-bottom: 1px solid #e6ebf2;
+        text-align: left;
+        vertical-align: top;
+        font-size: 14px;
+      }
+      th {
+        background: #f9fbfe;
+        color: #526074;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(140px, 1fr));
+        gap: 8px;
+      }
+      .actions form {
+        margin: 0;
+      }
+      .action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        text-decoration: none;
+        width: 100%;
+        min-height: 34px;
+        border-radius: 6px;
+        border: 1px solid #becada;
+        background: #ffffff;
+        color: #1f2b3d;
+        cursor: pointer;
+        padding: 6px 10px;
+        font-size: 13px;
+      }
+      .action.primary {
+        border-color: #176b54;
+        color: #0f513f;
+      }
+      .action.danger {
+        border-color: #de9b93;
+        color: #9f2d20;
+      }
+      .copy-id {
+        margin-top: 6px;
+        width: auto;
+        min-height: 28px;
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+      .copy-link {
+        margin-top: 8px;
+        width: auto;
+        min-height: 28px;
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        border-radius: 999px;
+        padding: 2px 9px;
+        font-size: 12px;
+        font-weight: 700;
+        border: 1px solid transparent;
+        white-space: nowrap;
+      }
+      .badge-green {
+        color: #0f513f;
+        background: #e8f5f0;
+        border-color: #abd8c5;
+      }
+      .badge-yellow {
+        color: #684a00;
+        background: #fff7d6;
+        border-color: #f1d37a;
+      }
+      .badge-orange {
+        color: #8a3b00;
+        background: #fff1df;
+        border-color: #efbf88;
+      }
+      .badge-red {
+        color: #9f2d20;
+        background: #fff1ef;
+        border-color: #f3b5ae;
+      }
+      .badge-gray {
+        color: #526074;
+        background: #f0f3f7;
+        border-color: #d4dbe6;
+      }
+      .history {
+        margin-top: 12px;
+        border-top: 1px solid #e6ebf2;
+        padding-top: 10px;
+      }
+      .history summary {
+        cursor: pointer;
+        color: #1d3f87;
+        font-weight: 700;
+      }
+      .history-list {
+        display: grid;
+        gap: 8px;
+        margin: 10px 0;
+      }
+      .history-item {
+        border: 1px solid #e6ebf2;
+        border-radius: 6px;
+        padding: 8px;
+        background: #f9fbfe;
+      }
+      .history-meta {
+        color: #526074;
+        font-size: 12px;
+      }
+      .receipt-thumb {
+        display: block;
+        width: 96px;
+        height: 96px;
+        object-fit: cover;
+        border: 1px solid #dfe5ef;
+        border-radius: 6px;
+        margin-top: 8px;
+      }
+      .history-link {
+        display: inline-flex;
+        margin-top: 8px;
+      }
+      .date-action {
+        display: grid;
+        gap: 6px;
+      }
+      .pagination {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 14px;
+        flex-wrap: wrap;
+      }
+      .page-link,
+      .logout {
+        border: 1px solid #becada;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #1f2b3d;
+        cursor: pointer;
+        padding: 8px 12px;
+        text-decoration: none;
+      }
+      .page-link.disabled {
+        color: #8d99aa;
+        pointer-events: none;
+        background: #f4f6f9;
+      }
+      .empty {
+        padding: 24px;
+        color: #526074;
+      }
+      @media (max-width: 760px) {
+        header,
+        main {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+        .toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Renewal Dashboard</h1>
+      <form method="post" action="/logout">
+        <button class="logout" type="submit">Sign out</button>
+      </form>
+    </header>
+    <main>
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <nav class="filters" aria-label="User filters">
+            <a class="filter" href="/dashboard/payments">Approved payments</a>
+            <a class="filter {% if active_filter == 'all' %}active{% endif %}" href="/dashboard?filter=all&search={{ search }}">All</a>
+            <a class="filter {% if active_filter == 'pending_payments' %}active{% endif %}" href="/dashboard?filter=pending_payments&search={{ search }}">Pending payments</a>
+            <a class="filter {% if active_filter == 'paid' %}active{% endif %}" href="/dashboard?filter=paid&search={{ search }}">Paid</a>
+            <a class="filter {% if active_filter == 'needs_new_receipt' %}active{% endif %}" href="/dashboard?filter=needs_new_receipt&search={{ search }}">Needs new receipt</a>
+            <a class="filter {% if active_filter == 'rejected' %}active{% endif %}" href="/dashboard?filter=rejected&search={{ search }}">Rejected</a>
+            <a class="filter {% if active_filter == 'active' %}active{% endif %}" href="/dashboard?filter=active&search={{ search }}">Active</a>
+            <a class="filter {% if active_filter == 'confirmed' %}active{% endif %}" href="/dashboard?filter=confirmed&search={{ search }}">Confirmed</a>
+            <a class="filter {% if active_filter == 'not_confirmed' %}active{% endif %}" href="/dashboard?filter=not_confirmed&search={{ search }}">Not confirmed</a>
+            <a class="filter {% if active_filter == 'source_confirm_subscription' %}active{% endif %}" href="/dashboard?filter=source_confirm_subscription&search={{ search }}">Source: confirm_subscription_button</a>
+            <a class="filter {% if active_filter == 'expiring_7' %}active{% endif %}" href="/dashboard?filter=expiring_7&search={{ search }}">Expiring in 7 days</a>
+            <a class="filter {% if active_filter == 'expired' %}active{% endif %}" href="/dashboard?filter=expired&search={{ search }}">Expired</a>
+            <a class="filter {% if active_filter == 'no_expiry' %}active{% endif %}" href="/dashboard?filter=no_expiry&search={{ search }}">No expiry date</a>
+            <a class="filter {% if active_filter == 'has_payment_history' %}active{% endif %}" href="/dashboard?filter=has_payment_history&search={{ search }}">Has payment history</a>
+            <a class="filter {% if active_filter == 'removed_inactive' %}active{% endif %}" href="/dashboard?filter=removed_inactive&search={{ search }}">Removed/inactive</a>
+          </nav>
+          <form class="search" method="get" action="/dashboard">
+            <input type="hidden" name="filter" value="{{ active_filter }}">
+            <input name="search" value="{{ search }}" placeholder="Search users" autocomplete="off">
+            <button class="action" type="submit">Search</button>
+            <a class="filter" href="/dashboard?filter={{ active_filter }}">Clear</a>
+          </form>
+        </div>
+        <div>{{ total_users }} users</div>
+      </div>
 
+      {% if message %}
+        <p class="notice">{{ message }}</p>
+      {% endif %}
+      {% if error %}
+        <p class="error">{{ error }}</p>
+      {% endif %}
+      {% if invite_link %}
+        <p class="invite">{{ invite_link }}</p>
+      {% endif %}
+
+      <div class="table-wrap">
+        {% if users %}
+          <table>
+            <thead>
+              <tr>
+                <th>Telegram ID</th>
+                <th>Username</th>
+                <th>First Name</th>
+                <th>Payment</th>
+                <th>Status</th>
+                <th>Confirmed</th>
+                <th>Confirmed At</th>
+                <th>Source</th>
+                <th>Registered / Join Date</th>
+                <th>Membership Start</th>
+                <th>Expiry Date</th>
+                <th>Days Remaining</th>
+                <th>Joined Channel</th>
+                <th>Left Channel</th>
+                <th>Invite Link</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for user in users %}
+                <tr>
+                  <td>
+                    <div>{{ user.telegram_id }}</div>
+                    <button class="action copy-id" type="button" data-copy="{{ user.telegram_id }}" data-copy-label="Copy Telegram ID">Copy Telegram ID</button>
+                  </td>
+                  <td>{% if user.username %}@{{ user.username }}{% else %}-{% endif %}</td>
+                  <td>{{ user.first_name or "-" }}</td>
+                  <td>
+                    {% set payment_status = user.payment_status or "unpaid" %}
+                    <span class="badge {% if payment_status == 'paid' %}badge-green{% elif payment_status == 'pending_review' %}badge-yellow{% elif payment_status == 'needs_new_receipt' %}badge-orange{% elif payment_status == 'rejected' %}badge-red{% else %}badge-gray{% endif %}">
+                      {{ payment_status }}
+                    </span>
+                  </td>
+                  <td>
+                    {% set row_status = user.status or "-" %}
+                    <span class="badge {% if user.days_remaining is not none and user.days_remaining < 0 %}badge-red{% elif row_status == 'active' %}badge-green{% elif row_status == 'inactive' %}badge-gray{% else %}badge-gray{% endif %}">
+                      {% if user.days_remaining is not none and user.days_remaining < 0 %}expired{% else %}{{ row_status }}{% endif %}
+                    </span>
+                  </td>
+                  <td>{% if user.confirmed_subscription %}Yes{% else %}No{% endif %}</td>
+                  <td>{{ user.confirmed_at_display or "-" }}</td>
+                  <td>{{ user.source or "-" }}</td>
+                  <td>{{ user.joined_at_display or "-" }}</td>
+                  <td>{{ user.membership_start_date_effective or "-" }}</td>
+                  <td>{{ user.expiry_date or "-" }}</td>
+                  <td>{% if user.days_remaining is not none %}{{ user.days_remaining }}{% else %}-{% endif %}</td>
+                  <td>{{ user.joined_channel_at_display or "-" }}</td>
+                  <td>{{ user.left_channel_at_display or "-" }}</td>
+                  <td>
+                    {% if user.invite_link %}
+                      <span class="invite-cell">{{ user.invite_link }}</span>
+                      <button class="action copy-link" type="button" data-copy="{{ user.invite_link }}" data-copy-label="Copy invite link">Copy invite link</button>
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td>{{ user.notes or "-" }}</td>
+                  <td>
+                    <div class="actions">
+                      <form class="date-action" method="post" action="/dashboard/users/{{ user.telegram_id }}/membership-start?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <input class="date-input" name="membership_start_date" type="date" value="{{ user.membership_start_date_effective or '' }}" required>
+                        <button class="action" type="submit">Set membership start date</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/approve-payment?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action primary" type="submit">Approve pending payment</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/reject-payment?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action" type="submit">Reject payment</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/ask-receipt?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action" type="submit">Ask for another receipt</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/renew/today?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action primary" type="submit">Renew +30 from today</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/renew/current-expiry?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action primary" type="submit">Renew +30 from expiry</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/paid?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action" type="submit">Mark paid</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/confirmed?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action" type="submit">Mark confirmed manually</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/not-confirmed?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action" type="submit">Mark not confirmed</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/inactive?filter={{ active_filter }}&search={{ search }}&page={{ page }}" onsubmit="return confirm('Mark this user inactive?');">
+                        <button class="action" type="submit">Mark inactive</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/invite?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action" type="submit">Generate invite link</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/revoke-current-invite?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action danger" type="submit">Revoke current invite</button>
+                      </form>
+                      <form method="post" action="/dashboard/users/{{ user.telegram_id }}/send-existing-invite?filter={{ active_filter }}&search={{ search }}&page={{ page }}">
+                        <button class="action" type="submit">Send existing invite link</button>
+                      </form>
+                      <a class="action danger" href="/dashboard/users/{{ user.telegram_id }}/remove?filter={{ active_filter }}&search={{ search }}&page={{ page }}">Remove from channel</a>
+                    </div>
+                    <details class="history">
+                      <summary>Approved Payment History</summary>
+                      {% if user.recent_payment_history %}
+                        <div class="history-list">
+                          {% for record in user.recent_payment_history %}
+                            <div class="history-item">
+                              <div><strong>{{ record.created_at_display or "-" }}</strong> · {{ record.action or "-" }}</div>
+                              <div class="history-meta">
+                                status: {{ record.payment_status or "-" }} · admin: {{ record.admin_id or "-" }} ·
+                                {{ record.membership_start_date or "-" }} to {{ record.expiry_date or "-" }}
+                              </div>
+                              {% if record.receipt_file_url %}
+                                {% if record.receipt_file_type == "photo" %}
+                                  <img class="receipt-thumb" src="{{ record.receipt_file_url }}" alt="Payment receipt preview">
+                                {% endif %}
+                                <a class="filter history-link" href="{{ record.receipt_file_url }}" target="_blank" rel="noopener">Open screenshot</a>
+                              {% endif %}
+                              <div>{{ record.notes or "-" }}</div>
+                            </div>
+                          {% endfor %}
+                        </div>
+                      {% else %}
+                        <p class="history-meta">No approved payment history yet.</p>
+                      {% endif %}
+                      <a class="filter" href="/dashboard/users/{{ user.telegram_id }}/history?filter={{ active_filter }}&search={{ search }}&page={{ page }}">View full history</a>
+                    </details>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No users found for this filter.</div>
+        {% endif %}
+      </div>
+      <nav class="pagination" aria-label="Pagination">
+        {% if has_previous %}
+          <a class="page-link" href="/dashboard?filter={{ active_filter }}&search={{ search }}&page={{ page - 1 }}">Previous</a>
+        {% else %}
+          <span class="page-link disabled">Previous</span>
+        {% endif %}
+        <span>Page {{ page }} of {{ total_pages }}</span>
+        {% if has_next %}
+          <a class="page-link" href="/dashboard?filter={{ active_filter }}&search={{ search }}&page={{ page + 1 }}">Next</a>
+        {% else %}
+          <span class="page-link disabled">Next</span>
+        {% endif %}
+      </nav>
+    </main>
+    <script>
+      document.querySelectorAll("[data-copy]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          await navigator.clipboard.writeText(button.dataset.copy);
+          const label = button.dataset.copyLabel || button.textContent;
+          button.textContent = "Copied";
+          window.setTimeout(() => {
+            button.textContent = label;
+          }, 1200);
+        });
+      });
+    </script>
+  </body>
+</html>
