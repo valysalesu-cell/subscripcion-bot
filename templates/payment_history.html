@@ -25,7 +25,10 @@
       .link-cell { max-width: 360px; overflow-wrap: anywhere; }
       .back { display: inline-flex; margin-top: 8px; }
       .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
-      .toolbar input { min-height: 34px; border: 1px solid #becada; border-radius: 6px; padding: 0 10px; font: inherit; font-size: 14px; width: min(360px, 100%); }
+      .toolbar input { min-height: 34px; border: 1px solid #becada; border-radius: 6px; padding: 0 10px; font: inherit; font-size: 14px; }
+      .toolbar input[type="search"] { width: min(360px, 100%); }
+      .toolbar input[type="date"] { width: 150px; }
+      .field { display: inline-flex; align-items: center; gap: 6px; color: #526074; font-size: 14px; }
       .button, .badge { display: inline-flex; align-items: center; min-height: 32px; border-radius: 6px; border: 1px solid #becada; background: #ffffff; color: #1f2b3d; padding: 0 10px; text-decoration: none; font: inherit; font-size: 14px; }
       .badge { min-height: 24px; border-color: #abd8c5; background: #e8f5f0; color: #0f513f; font-size: 12px; font-weight: 700; }
       .summary-card { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px; background: #ffffff; border: 1px solid #dfe5ef; border-radius: 8px; }
@@ -46,16 +49,27 @@
     <main>
       {% if payments_page %}
         <form class="toolbar" method="get" action="/dashboard/payments">
-          <input name="search" value="{{ search }}" placeholder="Search telegram_id or username" autocomplete="off">
-          <button class="button" type="submit">Search</button>
+          <input type="search" name="search" value="{{ search }}" placeholder="Search telegram_id or username" autocomplete="off">
+          <label class="field">
+            Desde
+            <input type="date" name="start_date" value="{{ start_date or '' }}">
+          </label>
+          <label class="field">
+            Hasta
+            <input type="date" name="end_date" value="{{ end_date or '' }}">
+          </label>
+          <button class="button" type="submit">Filtrar</button>
           <a class="button" href="/dashboard/payments">Clear</a>
-          <a class="button" href="/dashboard/payments/export.csv?search={{ search }}">Descargar Excel / CSV</a>
+          <a class="button" href="/dashboard/payments/export.csv?search={{ search }}&start_date={{ start_date or '' }}&end_date={{ end_date or '' }}">Descargar Excel / CSV</a>
         </form>
         <div class="summary-card">
           <span class="badge">Source: {{ summary.source }}</span>
           <span class="badge">Monto default: ${{ summary.amount }}</span>
           <span class="badge">Pagos aprobados: {{ summary.total_payments }}</span>
           <span class="badge">Total corte: ${{ summary.total_amount }}</span>
+          {% if start_date or end_date %}
+            <span class="badge">Rango: {{ start_date or 'inicio' }} → {{ end_date or 'hoy' }}</span>
+          {% endif %}
         </div>
       {% endif %}
       <div class="table-wrap">
