@@ -3,6 +3,9 @@ import logging
 import os
 import secrets
 import csv
+import json
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO, StringIO
@@ -148,6 +151,7 @@ class Settings:
     admin_password: str
     auto_remove_expired: bool
     renewal_notice_days: tuple[int, ...]
+    google_sheets_webhook_url: str | None
 
 
 def configure_logging() -> None:
@@ -219,6 +223,7 @@ def load_settings() -> Settings:
         admin_password=required_env("ADMIN_PASSWORD"),
         auto_remove_expired=parse_bool(os.getenv("AUTO_REMOVE_EXPIRED"), default=False),
         renewal_notice_days=parse_notice_days(os.getenv("RENEWAL_NOTICE_DAYS")),
+        google_sheets_webhook_url=os.getenv("GOOGLE_SHEETS_WEBHOOK_URL"),
     )
 
 
@@ -562,6 +567,53 @@ def payments_csv_response(rows: list[dict[str, Any]]) -> Response:
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+
+def append_approved_payment_to_google_sheet_sync(settings: Settings, telegram_id: int) -> None:
+    """Send one approved payment row to Google Sheets via Apps Script webhook.
+
+    This is intentionally best-effort: if Google Sheets is unavailable,
+    the bot approval flow must continue working normally.
+    """
+    webhook_url = (settings.google_sheets_webhook_url or "").strip()
+    if not webhook_url:
+        return
+
+    payload = {
+        "telegram_id": telegram_id,
+        "amount": DEFAULT_PAYMENT_AMOUNT,
+        "source": DEFAULT_PAYMENT_SOURCE,
+        "approved_at": now_utc_iso(),
+    }
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        webhook_url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=10) as response:
+        body = response.read().decode("utf-8", errors="replace")
+        logger.info(
+            "Google Sheets webhook response status=%s telegram_id=%s body=%s",
+            getattr(response, "status", "unknown"),
+            telegram_id,
+            body[:300],
+        )
+
+
+async def append_approved_payment_to_google_sheet(settings: Settings, telegram_id: int) -> None:
+    try:
+        await asyncio.to_thread(append_approved_payment_to_google_sheet_sync, settings, telegram_id)
+    except Exception:
+        logger.warning(
+            "Could not append approved payment to Google Sheets telegram_id=%s",
+            telegram_id,
+            exc_info=True,
+        )
+
 
 def upsert_user_payload(supabase: Client, telegram_id: int, payload: dict[str, Any]) -> None:
     existing = get_registered_user(supabase, telegram_id)
@@ -951,6 +1003,7 @@ async def approve_payment(
         existing_user.get("username") if existing_user else None,
         existing_user.get("first_name") if existing_user else None,
     )
+    await append_approved_payment_to_google_sheet(settings, telegram_id)
     dm_sent = await send_invite_to_user(bot, telegram_id, invite_link)
     if dm_sent:
         await bot.send_message(settings.admin_chat_id, f"Pago aprobado y link enviado a {telegram_id}")
