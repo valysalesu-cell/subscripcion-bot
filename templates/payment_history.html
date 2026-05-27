@@ -11,112 +11,26 @@
         background: #f5f7fb;
         color: #162033;
       }
-      body {
-        margin: 0;
-      }
-      header,
-      main {
-        padding: 22px 28px;
-      }
-      header {
-        background: #ffffff;
-        border-bottom: 1px solid #dfe5ef;
-      }
-      h1 {
-        margin: 0 0 8px;
-        font-size: 24px;
-      }
-      a {
-        color: #1d3f87;
-      }
-      .table-wrap {
-        overflow-x: auto;
-        background: #ffffff;
-        border: 1px solid #dfe5ef;
-        border-radius: 8px;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        min-width: 840px;
-      }
-      th,
-      td {
-        padding: 12px 14px;
-        border-bottom: 1px solid #e6ebf2;
-        text-align: left;
-        vertical-align: top;
-        font-size: 14px;
-      }
-      th {
-        background: #f9fbfe;
-        color: #526074;
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      tr:last-child td {
-        border-bottom: 0;
-      }
-      .empty {
-        padding: 24px;
-        color: #526074;
-      }
-      .link-cell {
-        max-width: 360px;
-        overflow-wrap: anywhere;
-      }
-      .back {
-        display: inline-flex;
-        margin-top: 8px;
-      }
-      .toolbar {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        flex-wrap: wrap;
-        margin-bottom: 16px;
-      }
-      .toolbar input {
-        min-height: 34px;
-        border: 1px solid #becada;
-        border-radius: 6px;
-        padding: 0 10px;
-        font: inherit;
-        font-size: 14px;
-        width: min(360px, 100%);
-      }
-      .button,
-      .badge {
-        display: inline-flex;
-        align-items: center;
-        min-height: 32px;
-        border-radius: 6px;
-        border: 1px solid #becada;
-        background: #ffffff;
-        color: #1f2b3d;
-        padding: 0 10px;
-        text-decoration: none;
-        font: inherit;
-        font-size: 14px;
-      }
-      .badge {
-        min-height: 24px;
-        border-color: #abd8c5;
-        background: #e8f5f0;
-        color: #0f513f;
-        font-size: 12px;
-        font-weight: 700;
-      }
-      .receipt-thumb {
-        display: block;
-        width: 92px;
-        height: 92px;
-        object-fit: cover;
-        border: 1px solid #dfe5ef;
-        border-radius: 6px;
-        margin-bottom: 8px;
-      }
+      body { margin: 0; }
+      header, main { padding: 22px 28px; }
+      header { background: #ffffff; border-bottom: 1px solid #dfe5ef; }
+      h1 { margin: 0 0 8px; font-size: 24px; }
+      a { color: #1d3f87; }
+      .table-wrap { overflow-x: auto; background: #ffffff; border: 1px solid #dfe5ef; border-radius: 8px; }
+      table { width: 100%; border-collapse: collapse; min-width: 1040px; }
+      th, td { padding: 12px 14px; border-bottom: 1px solid #e6ebf2; text-align: left; vertical-align: top; font-size: 14px; }
+      th { background: #f9fbfe; color: #526074; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+      tr:last-child td { border-bottom: 0; }
+      .empty { padding: 24px; color: #526074; }
+      .link-cell { max-width: 360px; overflow-wrap: anywhere; }
+      .back { display: inline-flex; margin-top: 8px; }
+      .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+      .toolbar input { min-height: 34px; border: 1px solid #becada; border-radius: 6px; padding: 0 10px; font: inherit; font-size: 14px; width: min(360px, 100%); }
+      .button, .badge { display: inline-flex; align-items: center; min-height: 32px; border-radius: 6px; border: 1px solid #becada; background: #ffffff; color: #1f2b3d; padding: 0 10px; text-decoration: none; font: inherit; font-size: 14px; }
+      .badge { min-height: 24px; border-color: #abd8c5; background: #e8f5f0; color: #0f513f; font-size: 12px; font-weight: 700; }
+      .summary-card { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px; background: #ffffff; border: 1px solid #dfe5ef; border-radius: 8px; }
+      .summary-card .badge { min-height: 30px; }
+      .receipt-thumb { display: block; width: 92px; height: 92px; object-fit: cover; border: 1px solid #dfe5ef; border-radius: 6px; margin-bottom: 8px; }
     </style>
   </head>
   <body>
@@ -135,7 +49,14 @@
           <input name="search" value="{{ search }}" placeholder="Search telegram_id or username" autocomplete="off">
           <button class="button" type="submit">Search</button>
           <a class="button" href="/dashboard/payments">Clear</a>
+          <a class="button" href="/dashboard/payments/export.csv?search={{ search }}">Descargar Excel / CSV</a>
         </form>
+        <div class="summary-card">
+          <span class="badge">Source: {{ summary.source }}</span>
+          <span class="badge">Monto default: ${{ summary.amount }}</span>
+          <span class="badge">Pagos aprobados: {{ summary.total_payments }}</span>
+          <span class="badge">Total corte: ${{ summary.total_amount }}</span>
+        </div>
       {% endif %}
       <div class="table-wrap">
         {% if history %}
@@ -145,6 +66,8 @@
                 <th>User</th>
                 <th>Telegram ID</th>
                 <th>Created At</th>
+                <th>Source</th>
+                <th>Amount</th>
                 <th>Expiry Date</th>
                 <th>Verified</th>
                 <th>Screenshot</th>
@@ -159,6 +82,8 @@
                   <td>{% if record.username %}@{{ record.username }}{% else %}{{ record.first_name or "-" }}{% endif %}</td>
                   <td>{{ record.telegram_id }}</td>
                   <td>{{ record.created_at_display or "-" }}</td>
+                  <td>{{ record.source or "bot" }}</td>
+                  <td>${{ record.amount or 299 }}</td>
                   <td>{{ record.expiry_date or "-" }}</td>
                   <td>{% if record.verified %}<span class="badge">Verified</span>{% else %}-{% endif %}</td>
                   <td>
