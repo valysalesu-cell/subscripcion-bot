@@ -2,9 +2,10 @@ import asyncio
 import logging
 import os
 import secrets
+import csv
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -40,6 +41,8 @@ CONFIRMATION_CAMPAIGN = "subscription_confirmation_v1"
 CONFIRMATION_SOURCE = "confirm_subscription_button"
 DATE_FORMAT = "%Y-%m-%d"
 APP_TIMEZONE = ZoneInfo("America/Mexico_City")
+DEFAULT_PAYMENT_AMOUNT = 299
+DEFAULT_PAYMENT_SOURCE = "bot"
 SCHEMA_MIGRATION_SQL = """
 alter table public.telegram_users add column if not exists joined_at timestamptz;
 alter table public.telegram_users add column if not exists membership_start_date date;
@@ -461,6 +464,67 @@ def list_approved_payments(supabase: Client, search: str = "", limit: int = 200)
         row["receipt_file_url"] = payment_receipt_file_url(row.get("receipt_file_id"))
     return rows
 
+
+
+
+def add_payment_report_fields(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for row in rows:
+        row["source"] = DEFAULT_PAYMENT_SOURCE
+        row["amount"] = DEFAULT_PAYMENT_AMOUNT
+        row["created_at_display"] = format_local_datetime(row.get("created_at"))
+        row["receipt_file_url"] = payment_receipt_file_url(row.get("receipt_file_id"))
+    return rows
+
+
+def payment_cut_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total_payments = len(rows)
+    total_amount = total_payments * DEFAULT_PAYMENT_AMOUNT
+    return {
+        "source": DEFAULT_PAYMENT_SOURCE,
+        "amount": DEFAULT_PAYMENT_AMOUNT,
+        "total_payments": total_payments,
+        "total_amount": total_amount,
+    }
+
+
+def payments_csv_response(rows: list[dict[str, Any]]) -> Response:
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "created_at",
+        "telegram_id",
+        "username",
+        "first_name",
+        "source",
+        "amount",
+        "payment_status",
+        "action",
+        "membership_start_date",
+        "expiry_date",
+        "admin_id",
+        "notes",
+    ])
+    for row in rows:
+        writer.writerow([
+            row.get("created_at_display") or format_local_datetime(row.get("created_at")),
+            row.get("telegram_id") or "",
+            f"@{row.get('username')}" if row.get("username") else "",
+            row.get("first_name") or "",
+            DEFAULT_PAYMENT_SOURCE,
+            DEFAULT_PAYMENT_AMOUNT,
+            row.get("payment_status") or "",
+            row.get("action") or "",
+            row.get("membership_start_date") or "",
+            row.get("expiry_date") or "",
+            row.get("admin_id") or "",
+            row.get("notes") or "",
+        ])
+    filename = f"corte_pagos_{datetime.now(APP_TIMEZONE).strftime('%Y-%m-%d')}.csv"
+    return Response(
+        content=output.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 def upsert_user_payload(supabase: Client, telegram_id: int, payload: dict[str, Any]) -> None:
     existing = get_registered_user(supabase, telegram_id)
@@ -2315,6 +2379,7 @@ def create_web_app(settings: Settings, supabase: Client, bot: Bot) -> FastAPI:
             return RedirectResponse(url="/login", status_code=303)
         try:
             rows = await asyncio.to_thread(list_approved_payments, supabase, search)
+            rows = add_payment_report_fields(rows)
             return templates.TemplateResponse(
                 request,
                 "payment_history.html",
@@ -2322,6 +2387,7 @@ def create_web_app(settings: Settings, supabase: Client, bot: Bot) -> FastAPI:
                     "request": request,
                     "payments_page": True,
                     "history": rows,
+                    "summary": payment_cut_summary(rows),
                     "search": search,
                     "active_filter": "all",
                     "page": 1,
@@ -2330,6 +2396,22 @@ def create_web_app(settings: Settings, supabase: Client, bot: Bot) -> FastAPI:
         except Exception as exc:
             logger.exception("Could not load approved payments")
             return dashboard_redirect("all", error=f"Could not load approved payments: {exc}")
+
+
+    @app.get("/dashboard/payments/export.csv", response_model=None)
+    async def dashboard_payments_export(
+        request: Request,
+        search: str = "",
+    ):
+        if not is_logged_in(request):
+            return RedirectResponse(url="/login", status_code=303)
+        try:
+            rows = await asyncio.to_thread(list_approved_payments, supabase, search, 5000)
+            rows = add_payment_report_fields(rows)
+            return payments_csv_response(rows)
+        except Exception as exc:
+            logger.exception("Could not export approved payments")
+            return dashboard_redirect("all", error=f"Could not export approved payments: {exc}")
 
     @app.get("/dashboard/payments/file", response_model=None)
     async def dashboard_payment_file(
