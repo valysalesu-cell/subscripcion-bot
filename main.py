@@ -440,16 +440,53 @@ def payment_receipt_file_url(file_id: Any) -> str | None:
     return f"/dashboard/payments/file?{urlencode({'file_id': str(file_id)})}"
 
 
-def list_approved_payments(supabase: Client, search: str = "", limit: int = 200) -> list[dict[str, Any]]:
-    response = (
+def parse_dashboard_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, DATE_FORMAT).date()
+    except ValueError:
+        return None
+
+
+def dashboard_date_start_iso(value: str | None) -> str | None:
+    parsed = parse_dashboard_date(value)
+    if not parsed:
+        return None
+    local_start = datetime.combine(parsed, datetime.min.time(), tzinfo=APP_TIMEZONE)
+    return local_start.astimezone(timezone.utc).isoformat()
+
+
+def dashboard_date_end_exclusive_iso(value: str | None) -> str | None:
+    parsed = parse_dashboard_date(value)
+    if not parsed:
+        return None
+    local_next_day = datetime.combine(parsed + timedelta(days=1), datetime.min.time(), tzinfo=APP_TIMEZONE)
+    return local_next_day.astimezone(timezone.utc).isoformat()
+
+
+def list_approved_payments(
+    supabase: Client,
+    search: str = "",
+    limit: int = 200,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[dict[str, Any]]:
+    query = (
         supabase.table("payment_history")
         .select("*")
         .eq("action", "approved")
         .eq("payment_status", "paid")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
     )
+
+    start_iso = dashboard_date_start_iso(start_date)
+    end_iso = dashboard_date_end_exclusive_iso(end_date)
+    if start_iso:
+        query = query.gte("created_at", start_iso)
+    if end_iso:
+        query = query.lt("created_at", end_iso)
+
+    response = query.order("created_at", desc=True).limit(limit).execute()
     rows = response.data or []
     search_term = search.strip().lower()
     if search_term:
@@ -2374,11 +2411,20 @@ def create_web_app(settings: Settings, supabase: Client, bot: Bot) -> FastAPI:
     async def dashboard_payments(
         request: Request,
         search: str = "",
+        start_date: str = "",
+        end_date: str = "",
     ):
         if not is_logged_in(request):
             return RedirectResponse(url="/login", status_code=303)
         try:
-            rows = await asyncio.to_thread(list_approved_payments, supabase, search)
+            rows = await asyncio.to_thread(
+                list_approved_payments,
+                supabase,
+                search,
+                200,
+                start_date,
+                end_date,
+            )
             rows = add_payment_report_fields(rows)
             return templates.TemplateResponse(
                 request,
@@ -2389,6 +2435,8 @@ def create_web_app(settings: Settings, supabase: Client, bot: Bot) -> FastAPI:
                     "history": rows,
                     "summary": payment_cut_summary(rows),
                     "search": search,
+                    "start_date": start_date,
+                    "end_date": end_date,
                     "active_filter": "all",
                     "page": 1,
                 },
@@ -2402,11 +2450,20 @@ def create_web_app(settings: Settings, supabase: Client, bot: Bot) -> FastAPI:
     async def dashboard_payments_export(
         request: Request,
         search: str = "",
+        start_date: str = "",
+        end_date: str = "",
     ):
         if not is_logged_in(request):
             return RedirectResponse(url="/login", status_code=303)
         try:
-            rows = await asyncio.to_thread(list_approved_payments, supabase, search, 5000)
+            rows = await asyncio.to_thread(
+                list_approved_payments,
+                supabase,
+                search,
+                5000,
+                start_date,
+                end_date,
+            )
             rows = add_payment_report_fields(rows)
             return payments_csv_response(rows)
         except Exception as exc:
