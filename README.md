@@ -325,6 +325,8 @@ The dashboard stores signed session cookies and does not expose the Supabase ser
 
 Users send payment receipts to the bot in private chat as a photo or document. The bot marks them `pending_review` and sends admin buttons to `ADMIN_CHAT_ID`. If a user sends another receipt while still pending review, the bot replaces the stored receipt reference and does not send another admin alert or create another approval button. Invite links are generated and sent only after an admin approves the payment.
 
+Tapping "Aprobar ✅" opens a checkbox menu with the available destinations (`CONTENT_CHANNEL_ID` plus the channels listed in `SECONDARY_CHANNELS` in `main.py`). Pick one or more and tap "Confirmar aprobación" — the bot generates a separate one-use invite link per selected channel (member limit 1, expires in 24h) and DMs all of them to the subscriber in one message. `/approve <telegram_id>` and the dashboard's approve button are unchanged and only grant `CONTENT_CHANNEL_ID` access. Removal (`/remove_expired_confirm`, the daily auto-remove job, and the dashboard's remove button) now bans the user from every configured destination, not just `CONTENT_CHANNEL_ID`.
+
 Payment history:
 
 - Only approved payments are appended to `payment_history`.

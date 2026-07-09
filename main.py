@@ -139,6 +139,30 @@ create index if not exists payment_history_payment_status_idx
 logger = logging.getLogger(__name__)
 router = Router()
 
+# Extra destinations offered on approval, in addition to CONTENT_CHANNEL_ID ("Privé").
+SECONDARY_CHANNELS: list[dict[str, Any]] = [
+    {"chat_id": -1003733783189, "name": "Set Nocturno"},
+    {"chat_id": -1004356647954, "name": "Wild Blossom"},
+]
+
+
+def approval_destinations(settings: "Settings") -> list[dict[str, Any]]:
+    return [{"chat_id": settings.content_channel_id, "name": "Privé"}] + SECONDARY_CHANNELS
+
+
+def all_destination_chat_ids(settings: "Settings") -> list[int | str]:
+    return [d["chat_id"] for d in approval_destinations(settings)]
+
+
+def chat_id_matches(chat, target: int | str) -> bool:
+    if isinstance(target, str):
+        return bool(getattr(chat, "username", None) and f"@{chat.username}" == target)
+    return chat.id == target
+
+
+def any_destination_matches(chat, settings: "Settings") -> bool:
+    return any(chat_id_matches(chat, cid) for cid in all_destination_chat_ids(settings))
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -790,7 +814,7 @@ def pending_payment_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Aprobar ✅", callback_data=f"payment:approve:{telegram_id}"),
+                InlineKeyboardButton(text="Aprobar ✅", callback_data=f"pysel:{telegram_id}:0"),
                 InlineKeyboardButton(text="Rechazar ❌", callback_data=f"payment:reject:{telegram_id}"),
             ],
             [
@@ -800,14 +824,30 @@ def pending_payment_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     )
 
 
-async def create_one_use_invite_link(bot: Bot, settings: Settings, telegram_id: int) -> tuple[str, str]:
+def destination_picker_keyboard(settings: Settings, telegram_id: int, bitmask: int) -> InlineKeyboardMarkup:
+    destinations = approval_destinations(settings)
+    rows = []
+    for i, dest in enumerate(destinations):
+        checked = bool(bitmask & (1 << i))
+        new_mask = bitmask ^ (1 << i)
+        label = f"{'✅' if checked else '⬜'} {dest['name']}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"pytog:{telegram_id}:{new_mask}")])
+    rows.append([InlineKeyboardButton(text="✅ Confirmar aprobación", callback_data=f"pyconf:{telegram_id}:{bitmask}")])
+    rows.append([InlineKeyboardButton(text="◀️ Cancelar", callback_data=f"pycancel:{telegram_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def create_one_use_invite_link(
+    bot: Bot, settings: Settings, telegram_id: int, chat_id: int | str | None = None
+) -> tuple[str, str]:
+    target_chat_id = settings.content_channel_id if chat_id is None else chat_id
     timestamp = int(datetime.now(timezone.utc).timestamp())
     name = f"approved-{telegram_id}-{timestamp}"
     invite = await bot.create_chat_invite_link(
-        chat_id=settings.content_channel_id,
+        chat_id=target_chat_id,
         name=name,
         member_limit=1,
-        expire_date=datetime.now(timezone.utc) + timedelta(hours=1),
+        expire_date=datetime.now(timezone.utc) + timedelta(hours=24),
     )
     return invite.invite_link, name
 
@@ -820,7 +860,7 @@ def has_active_unused_invite(row: dict[str, Any] | None) -> bool:
     created_at = parse_iso_datetime(row.get("invite_link_created_at"))
     if not created_at:
         return False
-    return datetime.now(timezone.utc) - created_at < timedelta(hours=1)
+    return datetime.now(timezone.utc) - created_at < timedelta(hours=24)
 
 
 def payment_recently_approved(row: dict[str, Any] | None) -> bool:
@@ -1020,6 +1060,98 @@ async def approve_payment(
     return {"invite_link": invite_link, "duplicate": False, "reused": reused_invite}
 
 
+async def approve_payment_multi(
+    bot: Bot,
+    supabase: Client,
+    settings: Settings,
+    telegram_id: int,
+    admin_id: int,
+    destinations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Same as approve_payment, but grants access to a chosen subset of channels
+    at once, each with its own one-use, 24h invite link."""
+    existing_user = await asyncio.to_thread(get_registered_user, supabase, telegram_id)
+    if payment_recently_approved(existing_user):
+        logger.warning("Duplicate multi-channel approval prevented telegram_id=%s", telegram_id)
+        return {"duplicate": True, "links": []}
+
+    today = datetime.now(APP_TIMEZONE).date()
+    expiry = today + timedelta(days=30)
+    primary_chat_id = settings.content_channel_id
+
+    links: list[tuple[str, str]] = []
+    primary_link: str | None = None
+    primary_name: str | None = None
+    for dest in destinations:
+        invite_link, invite_name = await create_one_use_invite_link(bot, settings, telegram_id, chat_id=dest["chat_id"])
+        links.append((dest["name"], invite_link))
+        if dest["chat_id"] == primary_chat_id:
+            primary_link, primary_name = invite_link, invite_name
+
+    channel_names = ", ".join(d["name"] for d in destinations)
+    approval_payload: dict[str, Any] = {
+        "telegram_id": telegram_id,
+        "status": "active",
+        "payment_status": "paid",
+        "approved_by_admin_id": admin_id,
+        "approved_at": now_utc_iso(),
+        "membership_start_date": today.isoformat(),
+        "expiry_date": expiry.isoformat(),
+        "last_payment_at": now_utc_iso(),
+        "notes": f"Payment approved by admin (channels: {channel_names})",
+    }
+    if primary_link:
+        approval_payload.update(
+            {
+                "invite_link": primary_link,
+                "invite_link_name": primary_name,
+                "invite_link_created_at": now_utc_iso(),
+                "invite_link_revoked": False,
+                "invite_link_used": False,
+            }
+        )
+    await asyncio.to_thread(upsert_user_payload, supabase, telegram_id, approval_payload)
+    await asyncio.to_thread(
+        insert_payment_history,
+        supabase,
+        telegram_id,
+        "approved",
+        "paid",
+        admin_id,
+        existing_user.get("pending_payment_file_id") if existing_user else None,
+        existing_user.get("pending_payment_file_type") if existing_user else None,
+        primary_link,
+        today.isoformat(),
+        expiry.isoformat(),
+        True,
+        f"Payment approved by admin (channels: {channel_names})",
+        existing_user.get("username") if existing_user else None,
+        existing_user.get("first_name") if existing_user else None,
+    )
+    await append_approved_payment_to_google_sheet(settings, telegram_id)
+
+    message_lines = ["Pago aprobado ✅ Aquí están tus accesos:"]
+    for name, link in links:
+        message_lines.append(f"\n<b>{name}</b>: {link}")
+    message_lines.append("\nCada link es personal, de un solo uso y expira en 24 horas.")
+    dm_sent = True
+    try:
+        await bot.send_message(telegram_id, "\n".join(message_lines), parse_mode="HTML")
+    except (TelegramBadRequest, TelegramForbiddenError):
+        dm_sent = False
+        logger.warning("Could not DM multi-channel invite links to telegram_id=%s", telegram_id, exc_info=True)
+
+    if dm_sent:
+        await bot.send_message(settings.admin_chat_id, f"Pago aprobado y links enviados a {telegram_id} ({channel_names})")
+    else:
+        await bot.send_message(
+            settings.admin_chat_id,
+            f"No pude enviar los links a {telegram_id}. El usuario debe abrir el bot o escribirle primero.",
+        )
+    logger.info("Multi-channel payment approved telegram_id=%s admin_id=%s channels=%s", telegram_id, admin_id, channel_names)
+    return {"duplicate": False, "links": links}
+
+
 async def reject_payment(
     bot: Bot,
     supabase: Client,
@@ -1114,12 +1246,16 @@ async def remove_user_from_channel(
     telegram_id: int,
     reason: str,
 ) -> None:
-    await bot.ban_chat_member(chat_id=settings.content_channel_id, user_id=telegram_id)
-    await bot.unban_chat_member(
-        chat_id=settings.content_channel_id,
-        user_id=telegram_id,
-        only_if_banned=True,
-    )
+    for chat_id in all_destination_chat_ids(settings):
+        try:
+            await bot.ban_chat_member(chat_id=chat_id, user_id=telegram_id)
+            await bot.unban_chat_member(chat_id=chat_id, user_id=telegram_id, only_if_banned=True)
+        except (TelegramBadRequest, TelegramForbiddenError):
+            logger.info(
+                "Could not remove telegram_id=%s from chat_id=%s (likely not a member there)",
+                telegram_id,
+                chat_id,
+            )
     await asyncio.to_thread(
         upsert_user_payload,
         supabase,
@@ -1964,12 +2100,104 @@ async def payment_admin_callback(callback_query: CallbackQuery, settings: Settin
         await callback_query.answer(f"Error: {exc}", show_alert=True)
 
 
+def _parse_py_callback(data: str) -> tuple[int, int] | None:
+    parts = data.split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        return int(parts[1]), int(parts[2])
+    except ValueError:
+        return None
+
+
+@router.callback_query(F.data.startswith("pysel:"))
+async def payment_select_start(callback_query: CallbackQuery, settings: Settings) -> None:
+    if not is_admin_id(callback_query.from_user.id if callback_query.from_user else None, settings):
+        await callback_query.answer("No autorizado.", show_alert=True)
+        return
+    parsed = _parse_py_callback(callback_query.data or "")
+    if not parsed:
+        await callback_query.answer("Acción inválida.", show_alert=True)
+        return
+    telegram_id, bitmask = parsed
+    await callback_query.message.edit_reply_markup(reply_markup=destination_picker_keyboard(settings, telegram_id, bitmask))
+    await callback_query.answer()
+
+
+@router.callback_query(F.data.startswith("pytog:"))
+async def payment_toggle_destination(callback_query: CallbackQuery, settings: Settings) -> None:
+    if not is_admin_id(callback_query.from_user.id if callback_query.from_user else None, settings):
+        await callback_query.answer("No autorizado.", show_alert=True)
+        return
+    parsed = _parse_py_callback(callback_query.data or "")
+    if not parsed:
+        await callback_query.answer("Acción inválida.", show_alert=True)
+        return
+    telegram_id, bitmask = parsed
+    await callback_query.message.edit_reply_markup(reply_markup=destination_picker_keyboard(settings, telegram_id, bitmask))
+    await callback_query.answer()
+
+
+@router.callback_query(F.data.startswith("pycancel:"))
+async def payment_select_cancel(callback_query: CallbackQuery, settings: Settings) -> None:
+    if not is_admin_id(callback_query.from_user.id if callback_query.from_user else None, settings):
+        await callback_query.answer("No autorizado.", show_alert=True)
+        return
+    try:
+        telegram_id = int((callback_query.data or "").split(":")[1])
+    except (IndexError, ValueError):
+        await callback_query.answer("Acción inválida.", show_alert=True)
+        return
+    await callback_query.message.edit_reply_markup(reply_markup=pending_payment_keyboard(telegram_id))
+    await callback_query.answer()
+
+
+@router.callback_query(F.data.startswith("pyconf:"))
+async def payment_confirm_multi(callback_query: CallbackQuery, settings: Settings, supabase: Client) -> None:
+    if not is_admin_id(callback_query.from_user.id if callback_query.from_user else None, settings):
+        await callback_query.answer("No autorizado.", show_alert=True)
+        return
+    parsed = _parse_py_callback(callback_query.data or "")
+    if not parsed:
+        await callback_query.answer("Acción inválida.", show_alert=True)
+        return
+    telegram_id, bitmask = parsed
+    if bitmask == 0:
+        await callback_query.answer("Selecciona al menos un destino.", show_alert=True)
+        return
+
+    destinations = approval_destinations(settings)
+    selected = [d for i, d in enumerate(destinations) if bitmask & (1 << i)]
+    try:
+        result = await approve_payment_multi(
+            callback_query.bot, supabase, settings, telegram_id, callback_query.from_user.id, selected
+        )
+    except Exception as exc:
+        logger.exception("Multi-channel approval failed telegram_id=%s", telegram_id)
+        await callback_query.answer(f"Error: {exc}", show_alert=True)
+        return
+
+    names = ", ".join(d["name"] for d in selected)
+    if result.get("duplicate"):
+        await callback_query.answer("Ya estaba aprobado recientemente.", show_alert=True)
+    else:
+        await callback_query.answer("Aprobado ✅")
+        try:
+            if callback_query.message.caption is not None:
+                await callback_query.message.edit_caption(
+                    caption=callback_query.message.caption + f"\n\n✅ APROBADO — Enviado a: {names}"
+                )
+            else:
+                await callback_query.message.edit_text(
+                    (callback_query.message.text or "") + f"\n\n✅ APROBADO — Enviado a: {names}"
+                )
+        except TelegramBadRequest:
+            pass
+
+
 @router.chat_member()
 async def track_channel_membership(update: ChatMemberUpdated, settings: Settings, supabase: Client) -> None:
-    channel_matches = update.chat.id == settings.content_channel_id
-    if isinstance(settings.content_channel_id, str):
-        channel_matches = update.chat.username and f"@{update.chat.username}" == settings.content_channel_id
-    if not channel_matches:
+    if not any_destination_matches(update.chat, settings):
         return
 
     user = update.new_chat_member.user
@@ -2013,10 +2241,7 @@ async def track_channel_membership(update: ChatMemberUpdated, settings: Settings
 
 @router.my_chat_member()
 async def track_bot_channel_membership(update: ChatMemberUpdated, settings: Settings) -> None:
-    channel_matches = update.chat.id == settings.content_channel_id
-    if isinstance(settings.content_channel_id, str):
-        channel_matches = update.chat.username and f"@{update.chat.username}" == settings.content_channel_id
-    if channel_matches:
+    if any_destination_matches(update.chat, settings):
         logger.info(
             "Bot membership changed in content channel old=%s new=%s",
             update.old_chat_member.status,
@@ -2663,12 +2888,16 @@ def create_web_app(settings: Settings, supabase: Client, bot: Bot) -> FastAPI:
         if not is_logged_in(request):
             return RedirectResponse(url="/login", status_code=303)
         try:
-            await bot.ban_chat_member(chat_id=settings.content_channel_id, user_id=telegram_id)
-            await bot.unban_chat_member(
-                chat_id=settings.content_channel_id,
-                user_id=telegram_id,
-                only_if_banned=True,
-            )
+            for chat_id in all_destination_chat_ids(settings):
+                try:
+                    await bot.ban_chat_member(chat_id=chat_id, user_id=telegram_id)
+                    await bot.unban_chat_member(chat_id=chat_id, user_id=telegram_id, only_if_banned=True)
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    logger.info(
+                        "Could not remove telegram_id=%s from chat_id=%s (likely not a member there)",
+                        telegram_id,
+                        chat_id,
+                    )
             await asyncio.to_thread(mark_user_removed, supabase, telegram_id)
             return dashboard_redirect(filter, search, page, message=f"User {telegram_id} removed from channel.")
         except (TelegramBadRequest, TelegramForbiddenError) as exc:
