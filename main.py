@@ -860,21 +860,10 @@ def mark_user_paid(supabase: Client, telegram_id: int) -> None:
     )
 
 
-def pending_payment_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Aprobar ✅", callback_data=f"pysel:{telegram_id}:0"),
-                InlineKeyboardButton(text="Rechazar ❌", callback_data=f"payment:reject:{telegram_id}"),
-            ],
-            [
-                InlineKeyboardButton(text="Pedir otra captura 🔁", callback_data=f"payment:ask_receipt:{telegram_id}"),
-            ],
-        ]
-    )
-
-
-def destination_picker_keyboard(settings: Settings, telegram_id: int, bitmask: int) -> InlineKeyboardMarkup:
+def pending_payment_keyboard(settings: Settings, telegram_id: int, bitmask: int = 0) -> InlineKeyboardMarkup:
+    """Checklist of destinations shown directly on the pending-payment message,
+    plus Reject / Ask another receipt. Tapping a destination toggles it in place;
+    tapping 'Aprobar seleccionados' generates one invite link per checked destination."""
     destinations = approval_destinations(settings)
     rows = []
     for i, dest in enumerate(destinations):
@@ -882,8 +871,13 @@ def destination_picker_keyboard(settings: Settings, telegram_id: int, bitmask: i
         new_mask = bitmask ^ (1 << i)
         label = f"{'✅' if checked else '⬜'} {dest['name']}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"pytog:{telegram_id}:{new_mask}")])
-    rows.append([InlineKeyboardButton(text="✅ Confirmar aprobación", callback_data=f"pyconf:{telegram_id}:{bitmask}")])
-    rows.append([InlineKeyboardButton(text="◀️ Cancelar", callback_data=f"pycancel:{telegram_id}")])
+    rows.append([InlineKeyboardButton(text="✅ Aprobar seleccionados", callback_data=f"pyconf:{telegram_id}:{bitmask}")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="Rechazar ❌", callback_data=f"payment:reject:{telegram_id}"),
+            InlineKeyboardButton(text="Pedir otra captura 🔁", callback_data=f"payment:ask_receipt:{telegram_id}"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1668,7 +1662,7 @@ async def receive_payment_receipt(message: Message, settings: Settings, supabase
         await message.bot.send_message(
             settings.admin_chat_id,
             admin_text,
-            reply_markup=pending_payment_keyboard(user.id),
+            reply_markup=pending_payment_keyboard(settings, user.id),
         )
         logger.info("Payment receipt submitted telegram_id=%s", user.id)
     except Exception:
@@ -2171,20 +2165,6 @@ def _parse_py_callback(data: str) -> tuple[int, int] | None:
         return None
 
 
-@router.callback_query(F.data.startswith("pysel:"))
-async def payment_select_start(callback_query: CallbackQuery, settings: Settings) -> None:
-    if not is_admin_id(callback_query.from_user.id if callback_query.from_user else None, settings):
-        await callback_query.answer("No autorizado.", show_alert=True)
-        return
-    parsed = _parse_py_callback(callback_query.data or "")
-    if not parsed:
-        await callback_query.answer("Acción inválida.", show_alert=True)
-        return
-    telegram_id, bitmask = parsed
-    await callback_query.message.edit_reply_markup(reply_markup=destination_picker_keyboard(settings, telegram_id, bitmask))
-    await callback_query.answer()
-
-
 @router.callback_query(F.data.startswith("pytog:"))
 async def payment_toggle_destination(callback_query: CallbackQuery, settings: Settings) -> None:
     if not is_admin_id(callback_query.from_user.id if callback_query.from_user else None, settings):
@@ -2195,21 +2175,7 @@ async def payment_toggle_destination(callback_query: CallbackQuery, settings: Se
         await callback_query.answer("Acción inválida.", show_alert=True)
         return
     telegram_id, bitmask = parsed
-    await callback_query.message.edit_reply_markup(reply_markup=destination_picker_keyboard(settings, telegram_id, bitmask))
-    await callback_query.answer()
-
-
-@router.callback_query(F.data.startswith("pycancel:"))
-async def payment_select_cancel(callback_query: CallbackQuery, settings: Settings) -> None:
-    if not is_admin_id(callback_query.from_user.id if callback_query.from_user else None, settings):
-        await callback_query.answer("No autorizado.", show_alert=True)
-        return
-    try:
-        telegram_id = int((callback_query.data or "").split(":")[1])
-    except (IndexError, ValueError):
-        await callback_query.answer("Acción inválida.", show_alert=True)
-        return
-    await callback_query.message.edit_reply_markup(reply_markup=pending_payment_keyboard(telegram_id))
+    await callback_query.message.edit_reply_markup(reply_markup=pending_payment_keyboard(settings, telegram_id, bitmask))
     await callback_query.answer()
 
 
