@@ -362,6 +362,33 @@ def format_user(row: dict[str, Any]) -> str:
     return f"{telegram_id} | {handle} | {full_name} | status: {status} | vence: {expiry}"
 
 
+SPANISH_MONTHS = {
+    1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
+    7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre",
+}
+
+
+def format_date_es(value: Any) -> str:
+    parsed = parse_iso_date(value)
+    if not parsed:
+        return str(value)
+    return f"{parsed.day} de {SPANISH_MONTHS[parsed.month]} de {parsed.year}"
+
+
+def renewal_reminder_message(expiry_date: Any) -> str:
+    fecha = format_date_es(expiry_date)
+    return (
+        "Hola bebé 💕\n\n"
+        f"Solo paso a recordarte que tu membresía vence el {fecha}. Te aviso con anticipación "
+        "para evitar que se te junte al final. ✨\n\n"
+        "En caso de no recibir tu renovación antes de esa fecha, tu acceso al canal será "
+        "removido automáticamente al día siguiente.\n\n"
+        "Si necesitas datos para transferencia o link de pago con tarjeta, házmelo saber y "
+        "con gusto te los envío. 💖\n\n"
+        "¡Gracias, bebé! 😘"
+    )
+
+
 def format_user_record(row: dict[str, Any]) -> str:
     if not row:
         return "Usuario no encontrado."
@@ -2302,6 +2329,22 @@ async def notify_expiring_today(bot: Bot, supabase: Client, settings: Settings) 
             if rows:
                 sections.append(f"Expiran en {notice_day} días ({target}): {len(rows)}")
                 sections.extend(format_user(row) for row in rows)
+
+                reminder_text = renewal_reminder_message(target)
+                dm_sent = 0
+                for row in rows:
+                    telegram_id = row.get("telegram_id")
+                    if not telegram_id:
+                        continue
+                    try:
+                        await bot.send_message(telegram_id, reminder_text)
+                        dm_sent += 1
+                    except (TelegramBadRequest, TelegramForbiddenError):
+                        logger.warning(
+                            "Could not DM renewal reminder to telegram_id=%s", telegram_id, exc_info=True
+                        )
+                sections.append(f"  → recordatorio enviado a {dm_sent}/{len(rows)} usuario(s)")
+
                 ids = [row["telegram_id"] for row in rows]
                 (
                     supabase.table("telegram_users")
