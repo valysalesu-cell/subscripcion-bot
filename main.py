@@ -228,7 +228,11 @@ def load_settings() -> Settings:
 
 
 def is_admin(message: Message, settings: Settings) -> bool:
-    return bool(message.from_user and message.from_user.id in settings.admin_user_ids)
+    if message.from_user is None:
+        # Direct channel post: Telegram hides from_user here for privacy, but only
+        # an admin of the channel can post directly, so we trust it.
+        return True
+    return message.from_user.id in settings.admin_user_ids
 
 
 def is_admin_id(user_id: int | None, settings: Settings) -> bool:
@@ -1372,6 +1376,7 @@ async def chat_id_channel_post(message: Message, settings: Settings) -> None:
 
 
 @router.message(Command("send_poll"))
+@router.channel_post(Command("send_poll"))
 async def send_poll(message: Message, settings: Settings) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1392,6 +1397,7 @@ async def send_poll(message: Message, settings: Settings) -> None:
 
 
 @router.message(Command("send_confirm_subscription"))
+@router.channel_post(Command("send_confirm_subscription"))
 async def send_confirm_subscription(message: Message, settings: Settings) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1473,6 +1479,7 @@ async def receive_payment_receipt(message: Message, settings: Settings, supabase
 
 
 @router.message(Command("users"))
+@router.channel_post(Command("users"))
 async def users(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1516,6 +1523,7 @@ def command_telegram_id(message: Message) -> int | None:
 
 
 @router.message(Command("unconfirmed"))
+@router.channel_post(Command("unconfirmed"))
 async def unconfirmed(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1545,6 +1553,7 @@ async def unconfirmed(message: Message, settings: Settings, supabase: Client) ->
 
 
 @router.message(Command("pending_payments"))
+@router.channel_post(Command("pending_payments"))
 async def pending_payments(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1571,6 +1580,7 @@ async def pending_payments(message: Message, settings: Settings, supabase: Clien
 
 
 @router.message(Command("user"))
+@router.channel_post(Command("user"))
 async def user_record(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1584,6 +1594,7 @@ async def user_record(message: Message, settings: Settings, supabase: Client) ->
 
 
 @router.message(Command("payment_history"))
+@router.channel_post(Command("payment_history"))
 async def payment_history_command(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1602,6 +1613,7 @@ async def payment_history_command(message: Message, settings: Settings, supabase
 
 
 @router.message(Command("send_invite"))
+@router.channel_post(Command("send_invite"))
 async def send_invite(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1619,6 +1631,7 @@ async def send_invite(message: Message, settings: Settings, supabase: Client) ->
 
 
 @router.message(Command("revoke_invite"))
+@router.channel_post(Command("revoke_invite"))
 async def revoke_invite(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1642,6 +1655,7 @@ async def revoke_invite(message: Message, settings: Settings, supabase: Client) 
 
 
 @router.message(Command("revoke_user"))
+@router.channel_post(Command("revoke_user"))
 async def revoke_user(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1666,6 +1680,7 @@ async def revoke_user(message: Message, settings: Settings, supabase: Client) ->
 
 
 @router.message(Command("revoke_link"))
+@router.channel_post(Command("revoke_link"))
 async def revoke_link(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1706,16 +1721,19 @@ async def revoke_link(message: Message, settings: Settings, supabase: Client) ->
 
 
 @router.message(Command("approve"))
+@router.channel_post(Command("approve"))
 async def approve_command(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
         return
     telegram_id = command_telegram_id(message)
-    if telegram_id is None or not message.from_user:
+    if telegram_id is None:
         await message.answer("Uso: /approve <telegram_id>")
         return
     try:
-        result = await approve_payment(message.bot, supabase, settings, telegram_id, message.from_user.id)
+        result = await approve_payment(
+            message.bot, supabase, settings, telegram_id, message.from_user.id if message.from_user else None
+        )
         if result.get("duplicate"):
             await message.answer(f"Pago ya aprobado recientemente; reenvié link existente para {telegram_id}.")
         else:
@@ -1726,6 +1744,7 @@ async def approve_command(message: Message, settings: Settings, supabase: Client
 
 
 @router.message(Command("reject"))
+@router.channel_post(Command("reject"))
 async def reject_command(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1739,6 +1758,7 @@ async def reject_command(message: Message, settings: Settings, supabase: Client)
 
 
 @router.message(Command("ask_receipt"))
+@router.channel_post(Command("ask_receipt"))
 async def ask_receipt_command(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1752,6 +1772,7 @@ async def ask_receipt_command(message: Message, settings: Settings, supabase: Cl
 
 
 @router.message(Command("set_expiry"))
+@router.channel_post(Command("set_expiry"))
 async def set_expiry(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1789,6 +1810,7 @@ async def set_expiry(message: Message, settings: Settings, supabase: Client) -> 
 
 
 @router.message(Command("expired"))
+@router.channel_post(Command("expired"))
 async def expired(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1809,6 +1831,7 @@ async def expired(message: Message, settings: Settings, supabase: Client) -> Non
 
 
 @router.message(Command("remove_expired"))
+@router.channel_post(Command("remove_expired"))
 async def remove_expired_entry(message: Message, settings: Settings, supabase: Client) -> None:
     """Punto de entrada seguro: nunca remueve directo, solo muestra el preview y explica el siguiente paso."""
     if not is_admin(message, settings):
@@ -1825,6 +1848,7 @@ async def remove_expired_entry(message: Message, settings: Settings, supabase: C
 
 
 @router.message(Command("remove_expired_preview"))
+@router.channel_post(Command("remove_expired_preview"))
 async def remove_expired_preview(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1838,6 +1862,7 @@ async def remove_expired_preview(message: Message, settings: Settings, supabase:
 
 
 @router.message(Command("remove_expired_confirm"))
+@router.channel_post(Command("remove_expired_confirm"))
 async def remove_expired_confirm(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
@@ -1860,6 +1885,7 @@ async def remove_expired_confirm(message: Message, settings: Settings, supabase:
 
 
 @router.message(Command("sync_schema"))
+@router.channel_post(Command("sync_schema"))
 async def sync_schema(message: Message, settings: Settings, supabase: Client) -> None:
     if not is_admin(message, settings):
         await reject_non_admin(message)
