@@ -247,13 +247,19 @@ The local web dashboard runs on `http://localhost:8080` unless `PORT` is set.
 /ask_receipt <telegram_id>
 /set_expiry <telegram_id> <YYYY-MM-DD>
 /expired
+/remove_expired
 /remove_expired_preview
 /remove_expired_confirm
 /unconfirmed
+/chat_id
 /sync_schema
 ```
 
 Only users listed in `ADMIN_USER_IDS` can run admin commands.
+
+`/chat_id` in a private chat replies with your own `telegram_user_id`. Used inside a group/channel (including a direct channel post, where the bot is admin), it does not reply there — it sends the chat_id to `ADMIN_CHAT_ID` instead, so it's never exposed to channel members.
+
+`/remove_expired` shows a preview of expired active users and tells you to run `/remove_expired_confirm` if you want to proceed; it never removes anyone by itself. `/remove_expired_preview` is the same preview alone, and `/remove_expired_confirm` actually bans expired users from `CONTENT_CHANNEL_ID` and marks them inactive.
 
 ## Web dashboard
 

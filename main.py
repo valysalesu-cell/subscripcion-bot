@@ -1339,6 +1339,38 @@ def upsert_confirmed_subscription_user(supabase: Client, callback_query: Callbac
     logger.info("Registered confirmed subscription user telegram_id=%s", user.id)
 
 
+async def _report_chat_id(bot: Bot, settings: Settings, chat) -> None:
+    label = chat.title or chat.type
+    text = f"💬 Chat ID de <b>{label}</b> (tipo: {chat.type}): <code>{chat.id}</code>"
+    await bot.send_message(settings.admin_chat_id, text, parse_mode="HTML")
+
+
+@router.message(Command("chat_id"))
+async def chat_id_command(message: Message, settings: Settings) -> None:
+    """
+    Utilidad de admin: obtener el chat_id de un canal/grupo donde el bot sea admin.
+    - En privado: responde directo con tu telegram_user_id (solo admins).
+    - En un grupo/canal: NO responde ahí (evita exponer el chat_id a los miembros);
+      en vez de eso lo manda al admin_chat_id ya configurado.
+    """
+    if message.chat.type == "private":
+        if not is_admin(message, settings):
+            return
+        await message.answer(f"👤 Tu telegram_user_id: <code>{message.from_user.id}</code>", parse_mode="HTML")
+        return
+
+    if message.from_user and not is_admin(message, settings):
+        return
+    await _report_chat_id(message.bot, settings, message.chat)
+
+
+@router.channel_post(Command("chat_id"))
+async def chat_id_channel_post(message: Message, settings: Settings) -> None:
+    # Los posts directos en un canal llegan sin from_user (Telegram lo oculta por
+    # privacidad); solo un admin del canal puede publicar ahí si está restringido.
+    await _report_chat_id(message.bot, settings, message.chat)
+
+
 @router.message(Command("send_poll"))
 async def send_poll(message: Message, settings: Settings) -> None:
     if not is_admin(message, settings):
@@ -1773,6 +1805,22 @@ async def expired(message: Message, settings: Settings, supabase: Client) -> Non
     lines.extend(format_user(row) for row in rows)
     if not rows:
         lines.append("No hay usuarios activos expirados.")
+    await send_long_message(message, "\n".join(lines))
+
+
+@router.message(Command("remove_expired"))
+async def remove_expired_entry(message: Message, settings: Settings, supabase: Client) -> None:
+    """Punto de entrada seguro: nunca remueve directo, solo muestra el preview y explica el siguiente paso."""
+    if not is_admin(message, settings):
+        await reject_non_admin(message)
+        return
+    rows = await asyncio.to_thread(expired_active_users, supabase)
+    lines = [f"Usuarios que serían removidos: {len(rows)}"]
+    lines.extend(format_user(row) for row in rows)
+    if not rows:
+        lines.append("No hay usuarios para remover.")
+    else:
+        lines.append("\nUsa /remove_expired_confirm para removerlos del canal.")
     await send_long_message(message, "\n".join(lines))
 
 
