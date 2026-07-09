@@ -134,6 +134,22 @@ create index if not exists payment_history_created_at_idx
   on public.payment_history (created_at desc);
 create index if not exists payment_history_payment_status_idx
   on public.payment_history (payment_status);
+create table if not exists public.secondary_channel_invites (
+  id bigserial primary key,
+  telegram_id bigint not null,
+  chat_id bigint not null,
+  chat_name text,
+  username text,
+  first_name text,
+  invite_link text not null,
+  invite_link_name text,
+  created_at timestamptz default now(),
+  expires_at timestamptz
+);
+create index if not exists secondary_channel_invites_telegram_id_idx
+  on public.secondary_channel_invites (telegram_id);
+create index if not exists secondary_channel_invites_chat_id_idx
+  on public.secondary_channel_invites (chat_id);
 """.strip()
 
 logger = logging.getLogger(__name__)
@@ -432,6 +448,40 @@ def insert_payment_history(
             "Could not insert payment history action=%s telegram_id=%s",
             action,
             telegram_id,
+            exc_info=True,
+        )
+
+
+def log_secondary_channel_invite(
+    supabase: Client,
+    telegram_id: int,
+    chat_id: int | str,
+    chat_name: str,
+    username: str | None,
+    first_name: str | None,
+    invite_link: str,
+    invite_link_name: str,
+) -> None:
+    """Best-effort record of an invite generated for a non-Privé destination, so an
+    external bot/process can independently manage access to that channel."""
+    try:
+        supabase.table("secondary_channel_invites").insert(
+            {
+                "telegram_id": telegram_id,
+                "chat_id": chat_id,
+                "chat_name": chat_name,
+                "username": username,
+                "first_name": first_name,
+                "invite_link": invite_link,
+                "invite_link_name": invite_link_name,
+                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+            }
+        ).execute()
+    except Exception:
+        logger.warning(
+            "Could not log secondary channel invite telegram_id=%s chat_id=%s",
+            telegram_id,
+            chat_id,
             exc_info=True,
         )
 
@@ -1087,6 +1137,19 @@ async def approve_payment_multi(
         links.append((dest["name"], invite_link))
         if dest["chat_id"] == primary_chat_id:
             primary_link, primary_name = invite_link, invite_name
+        else:
+            # Not auto-managed by this bot; logged so an external process can handle it.
+            await asyncio.to_thread(
+                log_secondary_channel_invite,
+                supabase,
+                telegram_id,
+                dest["chat_id"],
+                dest["name"],
+                existing_user.get("username") if existing_user else None,
+                existing_user.get("first_name") if existing_user else None,
+                invite_link,
+                invite_name,
+            )
 
     channel_names = ", ".join(d["name"] for d in destinations)
     approval_payload: dict[str, Any] = {
@@ -1246,16 +1309,14 @@ async def remove_user_from_channel(
     telegram_id: int,
     reason: str,
 ) -> None:
-    for chat_id in all_destination_chat_ids(settings):
-        try:
-            await bot.ban_chat_member(chat_id=chat_id, user_id=telegram_id)
-            await bot.unban_chat_member(chat_id=chat_id, user_id=telegram_id, only_if_banned=True)
-        except (TelegramBadRequest, TelegramForbiddenError):
-            logger.info(
-                "Could not remove telegram_id=%s from chat_id=%s (likely not a member there)",
-                telegram_id,
-                chat_id,
-            )
+    # Only CONTENT_CHANNEL_ID ("Privé") has a 30-day expiry; the extra channels
+    # granted via the multi-channel approval menu are not auto-removed.
+    await bot.ban_chat_member(chat_id=settings.content_channel_id, user_id=telegram_id)
+    await bot.unban_chat_member(
+        chat_id=settings.content_channel_id,
+        user_id=telegram_id,
+        only_if_banned=True,
+    )
     await asyncio.to_thread(
         upsert_user_payload,
         supabase,
@@ -2197,7 +2258,9 @@ async def payment_confirm_multi(callback_query: CallbackQuery, settings: Setting
 
 @router.chat_member()
 async def track_channel_membership(update: ChatMemberUpdated, settings: Settings, supabase: Client) -> None:
-    if not any_destination_matches(update.chat, settings):
+    # Only CONTENT_CHANNEL_ID ("Privé") drives subscription status/expiry; the extra
+    # channels from the multi-channel approval menu are tracked separately.
+    if not chat_id_matches(update.chat, settings.content_channel_id):
         return
 
     user = update.new_chat_member.user
@@ -2888,16 +2951,14 @@ def create_web_app(settings: Settings, supabase: Client, bot: Bot) -> FastAPI:
         if not is_logged_in(request):
             return RedirectResponse(url="/login", status_code=303)
         try:
-            for chat_id in all_destination_chat_ids(settings):
-                try:
-                    await bot.ban_chat_member(chat_id=chat_id, user_id=telegram_id)
-                    await bot.unban_chat_member(chat_id=chat_id, user_id=telegram_id, only_if_banned=True)
-                except (TelegramBadRequest, TelegramForbiddenError):
-                    logger.info(
-                        "Could not remove telegram_id=%s from chat_id=%s (likely not a member there)",
-                        telegram_id,
-                        chat_id,
-                    )
+            # Only CONTENT_CHANNEL_ID ("Privé") has a 30-day expiry; channels granted
+            # via the multi-channel approval menu are not auto-removed.
+            await bot.ban_chat_member(chat_id=settings.content_channel_id, user_id=telegram_id)
+            await bot.unban_chat_member(
+                chat_id=settings.content_channel_id,
+                user_id=telegram_id,
+                only_if_banned=True,
+            )
             await asyncio.to_thread(mark_user_removed, supabase, telegram_id)
             return dashboard_redirect(filter, search, page, message=f"User {telegram_id} removed from channel.")
         except (TelegramBadRequest, TelegramForbiddenError) as exc:
