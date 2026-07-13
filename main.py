@@ -159,6 +159,7 @@ router = Router()
 SECONDARY_CHANNELS: list[dict[str, Any]] = [
     {"chat_id": -1003733783189, "name": "Set Nocturno"},
     {"chat_id": -1004356647954, "name": "Wild Blossom"},
+    {"chat_id": -1004432907824, "name": "Regalito Privé"},
 ]
 
 
