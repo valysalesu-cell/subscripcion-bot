@@ -44,7 +44,7 @@ CONFIRMATION_CAMPAIGN = "subscription_confirmation_v1"
 CONFIRMATION_SOURCE = "confirm_subscription_button"
 DATE_FORMAT = "%Y-%m-%d"
 APP_TIMEZONE = ZoneInfo("America/Mexico_City")
-DEFAULT_PAYMENT_AMOUNT = 299
+DEFAULT_PAYMENT_AMOUNT = 300
 DEFAULT_PAYMENT_SOURCE = "bot"
 SCHEMA_MIGRATION_SQL = """
 alter table public.telegram_users add column if not exists joined_at timestamptz;
