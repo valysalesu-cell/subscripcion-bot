@@ -912,6 +912,9 @@ def pending_payment_keyboard(settings: Settings, telegram_id: int, bitmask: int 
 async def create_one_use_invite_link(
     bot: Bot, settings: Settings, telegram_id: int, chat_id: int | str | None = None
 ) -> tuple[str, str]:
+    """One-use invite link with no time expiry. member_limit=1 blocks a second join
+    outright, and track_channel_membership() revokes the link the instant someone
+    joins with it, so it can never be reused even if they later leave."""
     target_chat_id = settings.content_channel_id if chat_id is None else chat_id
     timestamp = int(datetime.now(timezone.utc).timestamp())
     name = f"approved-{telegram_id}-{timestamp}"
@@ -919,20 +922,15 @@ async def create_one_use_invite_link(
         chat_id=target_chat_id,
         name=name,
         member_limit=1,
-        expire_date=datetime.now(timezone.utc) + timedelta(hours=24),
     )
     return invite.invite_link, name
 
 
 def has_active_unused_invite(row: dict[str, Any] | None) -> bool:
+    """Links no longer expire by time, so 'active' just means not revoked/used."""
     if not row or not row.get("invite_link"):
         return False
-    if row.get("invite_link_revoked") is True or row.get("invite_link_used") is True:
-        return False
-    created_at = parse_iso_datetime(row.get("invite_link_created_at"))
-    if not created_at:
-        return False
-    return datetime.now(timezone.utc) - created_at < timedelta(hours=24)
+    return row.get("invite_link_revoked") is not True and row.get("invite_link_used") is not True
 
 
 def payment_recently_approved(row: dict[str, Any] | None) -> bool:
@@ -2251,18 +2249,36 @@ async def payment_confirm_multi(callback_query: CallbackQuery, settings: Setting
 
 
 @router.chat_member()
-async def track_channel_membership(update: ChatMemberUpdated, settings: Settings, supabase: Client) -> None:
+async def track_channel_membership(update: ChatMemberUpdated, bot: Bot, settings: Settings, supabase: Client) -> None:
+    if not any_destination_matches(update.chat, settings):
+        return
+
+    old_status = update.old_chat_member.status
+    new_status = update.new_chat_member.status
+    active_statuses = {"member", "administrator", "creator"}
+    left_statuses = {"left", "kicked"}
+    joined = new_status in active_statuses and old_status not in active_statuses
+
+    # Revoke the invite link the instant it's used, on every configured destination,
+    # so it can never be reused even if this member later leaves.
+    if joined and update.invite_link:
+        try:
+            await bot.revoke_chat_invite_link(update.chat.id, update.invite_link.invite_link)
+        except (TelegramBadRequest, TelegramForbiddenError):
+            logger.info(
+                "Could not revoke invite link after join chat_id=%s telegram_id=%s",
+                update.chat.id,
+                update.new_chat_member.user.id,
+                exc_info=True,
+            )
+
     # Only CONTENT_CHANNEL_ID ("Privé") drives subscription status/expiry; the extra
-    # channels from the multi-channel approval menu are tracked separately.
+    # channels from the multi-channel approval menu don't update telegram_users here.
     if not chat_id_matches(update.chat, settings.content_channel_id):
         return
 
     user = update.new_chat_member.user
-    old_status = update.old_chat_member.status
-    new_status = update.new_chat_member.status
     now = now_utc_iso()
-    active_statuses = {"member", "administrator", "creator"}
-    left_statuses = {"left", "kicked"}
     payload = {
         "telegram_id": user.id,
         "username": user.username,
@@ -2270,7 +2286,7 @@ async def track_channel_membership(update: ChatMemberUpdated, settings: Settings
         "last_name": user.last_name,
         "last_seen_at": now,
     }
-    if new_status in active_statuses and old_status not in active_statuses:
+    if joined:
         payload.update(
             {
                 "joined_channel_at": now,
