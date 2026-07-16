@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.verify_venv/
+.DS_Store
+catalog_sets/

@@ -160,6 +160,24 @@ SECONDARY_CHANNELS: list[dict[str, Any]] = [
     {"chat_id": -1003733783189, "name": "Set Nocturno"},
     {"chat_id": -1004356647954, "name": "Wild Blossom"},
     {"chat_id": -1004432907824, "name": "Regalito Privé"},
+    {"chat_id": -1003987300439, "name": "Pink lite"},
+    {"chat_id": -1003549780280, "name": "Dark desire"},
+    {"chat_id": -1003950296188, "name": "Marissa & Sofia"},
+    {"chat_id": -1004339260246, "name": "Wet Look"},
+    {"chat_id": -1003819994140, "name": "💕"},
+    {"chat_id": -1004306644851, "name": "Sweet Reward 🍒"},
+    {"chat_id": -1004302801824, "name": "Until We Meet Again"},
+    {"chat_id": -1004296860872, "name": "White Desire"},
+    {"chat_id": -1004369087281, "name": "Green Temptation"},
+    {"chat_id": -1003908781230, "name": "Orange Seduction"},
+    {"chat_id": -1003905259478, "name": "Pink & Black"},
+    {"chat_id": -1003762082026, "name": "Kissed ☀️"},
+    {"chat_id": -1003701312798, "name": "Marissa & Chivis"},
+    {"chat_id": -1003939892671, "name": "Mirror 🔥"},
+    {"chat_id": -1003965930093, "name": "GOLDEN GIRL"},
+    {"chat_id": -1003936604882, "name": "MUSTANG"},
+    {"chat_id": -1003545835165, "name": "BLUE VELVET 💙✨"},
+    {"chat_id": -1003994786056, "name": "Old West"},
 ]
 
 
@@ -893,12 +911,13 @@ def pending_payment_keyboard(settings: Settings, telegram_id: int, bitmask: int 
     plus Reject / Ask another receipt. Tapping a destination toggles it in place;
     tapping 'Aprobar seleccionados' generates one invite link per checked destination."""
     destinations = approval_destinations(settings)
-    rows = []
+    buttons = []
     for i, dest in enumerate(destinations):
         checked = bool(bitmask & (1 << i))
         new_mask = bitmask ^ (1 << i)
         label = f"{'✅' if checked else '⬜'} {dest['name']}"
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"pytog:{telegram_id}:{new_mask}")])
+        buttons.append(InlineKeyboardButton(text=label, callback_data=f"pytog:{telegram_id}:{new_mask}"))
+    rows = [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
     rows.append([InlineKeyboardButton(text="✅ Aprobar seleccionados", callback_data=f"pyconf:{telegram_id}:{bitmask}")])
     rows.append(
         [
@@ -2233,19 +2252,24 @@ async def payment_confirm_multi(callback_query: CallbackQuery, settings: Setting
     names = ", ".join(d["name"] for d in selected)
     if result.get("duplicate"):
         await callback_query.answer("Ya estaba aprobado recientemente.", show_alert=True)
+        note = "\n\n⚠️ Ya estaba aprobado recientemente."
     else:
         await callback_query.answer("Aprobado ✅")
-        try:
-            if callback_query.message.caption is not None:
-                await callback_query.message.edit_caption(
-                    caption=callback_query.message.caption + f"\n\n✅ APROBADO — Enviado a: {names}"
-                )
-            else:
-                await callback_query.message.edit_text(
-                    (callback_query.message.text or "") + f"\n\n✅ APROBADO — Enviado a: {names}"
-                )
-        except TelegramBadRequest:
-            pass
+        note = f"\n\n✅ APROBADO — Enviado a: {names}"
+
+    try:
+        if callback_query.message.caption is not None:
+            await callback_query.message.edit_caption(
+                caption=(callback_query.message.caption or "") + note,
+                reply_markup=None,
+            )
+        else:
+            await callback_query.message.edit_text(
+                (callback_query.message.text or "") + note,
+                reply_markup=None,
+            )
+    except TelegramBadRequest:
+        pass
 
 
 @router.chat_member()
