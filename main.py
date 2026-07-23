@@ -1816,6 +1816,51 @@ async def pending_payments(message: Message, settings: Settings, supabase: Clien
     await send_long_message(message, "\n".join(lines))
 
 
+@router.message(Command("reject_all_pending"))
+@router.channel_post(Command("reject_all_pending"))
+async def reject_all_pending(message: Message, settings: Settings, supabase: Client) -> None:
+    """Rechaza en bloque todos los pagos con payment_status=pending_review.
+    Usa /pending_payments primero para revisar la lista antes de correr esto."""
+    if not is_admin(message, settings):
+        await reject_non_admin(message)
+        return
+    try:
+        response = (
+            supabase.table("telegram_users")
+            .select("*")
+            .eq("payment_status", "pending_review")
+            .execute()
+        )
+    except Exception as exc:
+        logger.exception("Could not fetch pending payments for bulk reject")
+        await message.answer(f"No pude consultar pagos pendientes: {exc}")
+        return
+
+    rows = response.data or []
+    if not rows:
+        await message.answer("No hay pagos pendientes que rechazar.")
+        return
+
+    admin_id = message.from_user.id if message.from_user else None
+    rejected = 0
+    errors: list[str] = []
+    for row in rows:
+        telegram_id = row.get("telegram_id")
+        if not telegram_id:
+            continue
+        try:
+            await reject_payment(message.bot, supabase, settings, int(telegram_id), admin_id)
+            rejected += 1
+        except Exception as exc:
+            logger.exception("Could not reject telegram_id=%s in bulk reject", telegram_id)
+            errors.append(f"{telegram_id}: {exc}")
+
+    text = f"Rechazados: {rejected}/{len(rows)}"
+    if errors:
+        text += "\nErrores:\n" + "\n".join(errors[:10])
+    await send_long_message(message, text)
+
+
 @router.message(Command("user"))
 @router.channel_post(Command("user"))
 async def user_record(message: Message, settings: Settings, supabase: Client) -> None:

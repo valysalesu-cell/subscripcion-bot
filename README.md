@@ -236,6 +236,7 @@ The local web dashboard runs on `http://localhost:8080` unless `PORT` is set.
 /send_confirm_subscription
 /users
 /pending_payments
+/reject_all_pending
 /user <telegram_id>
 /payment_history <telegram_id>
 /send_invite <telegram_id>
@@ -256,6 +257,8 @@ The local web dashboard runs on `http://localhost:8080` unless `PORT` is set.
 ```
 
 Only users listed in `ADMIN_USER_IDS` can run admin commands.
+
+`/reject_all_pending` rejects every user currently in `payment_status = pending_review` (same effect as running `/reject <telegram_id>` on each one — each gets the standard rejection DM). Review with `/pending_payments` first; there's no undo.
 
 `/chat_id` in a private chat replies with your own `telegram_user_id`. Used inside a group/channel (including a direct channel post, where the bot is admin), it does not reply there — it sends the chat_id to `ADMIN_CHAT_ID` instead, so it's never exposed to channel members.
 
