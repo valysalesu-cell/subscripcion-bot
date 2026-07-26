@@ -1342,6 +1342,20 @@ def expired_active_users(supabase: Client) -> list[dict[str, Any]]:
     return response.data or []
 
 
+def active_users_expiring_within(supabase: Client, days: int) -> list[dict[str, Any]]:
+    today = today_iso()
+    target = (datetime.now(APP_TIMEZONE).date() + timedelta(days=days)).isoformat()
+    response = (
+        supabase.table("telegram_users")
+        .select("*")
+        .eq("status", "active")
+        .gte("expiry_date", today)
+        .lte("expiry_date", target)
+        .execute()
+    )
+    return response.data or []
+
+
 async def remove_user_from_channel(
     bot: Bot,
     supabase: Client,
@@ -1652,6 +1666,40 @@ async def send_confirm_subscription(message: Message, settings: Settings) -> Non
         return
 
     await message.answer("Mensaje de confirmación enviado al canal.")
+
+
+PROMO_RENOVACION_MESSAGE = (
+    "🔥 Oferta solo por hoy, bebé 🔥\n\n"
+    "Renueva tu acceso a Privé por solo <b>$200 MXN</b> (precio especial, válido solo hoy) "
+    "y te tengo un regalito 😏🎁\n\n"
+    "Manda tu comprobante aquí mismo para aprovecharlo antes de que se acabe el día 💕"
+)
+
+
+@router.message(Command("promo_renovacion"))
+@router.channel_post(Command("promo_renovacion"))
+async def promo_renovacion_command(message: Message, settings: Settings, supabase: Client) -> None:
+    if not is_admin(message, settings):
+        await reject_non_admin(message)
+        return
+
+    rows = await asyncio.to_thread(active_users_expiring_within, supabase, 7)
+    if not rows:
+        await message.answer("No hay nadie que venza en los próximos 7 días.")
+        return
+
+    sent = 0
+    for row in rows:
+        telegram_id = row.get("telegram_id")
+        if not telegram_id:
+            continue
+        try:
+            await message.bot.send_message(telegram_id, PROMO_RENOVACION_MESSAGE, parse_mode="HTML")
+            sent += 1
+        except (TelegramBadRequest, TelegramForbiddenError):
+            logger.warning("Could not send promo_renovacion to telegram_id=%s", telegram_id, exc_info=True)
+
+    await message.answer(f"Promo enviada a {sent}/{len(rows)} usuario(s) que vencen en los próximos 7 días.")
 
 
 @router.message(F.chat.type == "private", (F.photo | F.document))
