@@ -1683,9 +1683,9 @@ async def promo_renovacion_command(message: Message, settings: Settings, supabas
         await reject_non_admin(message)
         return
 
-    rows = await asyncio.to_thread(active_users_expiring_within, supabase, 7)
+    rows = await asyncio.to_thread(active_users_expiring_within, supabase, 10)
     if not rows:
-        await message.answer("No hay nadie que venza en los próximos 7 días.")
+        await message.answer("No hay nadie que venza en los próximos 10 días.")
         return
 
     sent = 0
@@ -1699,7 +1699,7 @@ async def promo_renovacion_command(message: Message, settings: Settings, supabas
         except (TelegramBadRequest, TelegramForbiddenError):
             logger.warning("Could not send promo_renovacion to telegram_id=%s", telegram_id, exc_info=True)
 
-    await message.answer(f"Promo enviada a {sent}/{len(rows)} usuario(s) que vencen en los próximos 7 días.")
+    await message.answer(f"Promo enviada a {sent}/{len(rows)} usuario(s) que vencen en los próximos 10 días.")
 
 
 @router.message(F.chat.type == "private", (F.photo | F.document))
