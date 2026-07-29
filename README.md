@@ -254,11 +254,15 @@ The local web dashboard runs on `http://localhost:8080` unless `PORT` is set.
 /unconfirmed
 /chat_id
 /sync_schema
+/promo_renovacion
+/broadcast <días> <mensaje>
 ```
 
 Only users listed in `ADMIN_USER_IDS` can run admin commands.
 
 `/reject_all_pending` rejects every user currently in `payment_status = pending_review` (same effect as running `/reject <telegram_id>` on each one — each gets the standard rejection DM). Review with `/pending_payments` first; there's no undo.
+
+`/broadcast <días> <mensaje>` DMs every active user whose `expiry_date` falls within the given number of days from today, with a custom message — no code change needed for future promos. Attach a photo/video/voice note to the same message (as its caption) to include it. To include a *second* photo/video/voice note, send it first on its own, then send the `/broadcast ...` command as a reply to that message. `/promo_renovacion` is the older fixed-text, no-media, 10-day version kept for convenience.
 
 `/chat_id` in a private chat replies with your own `telegram_user_id`. Used inside a group/channel (including a direct channel post, where the bot is admin), it does not reply there — it sends the chat_id to `ADMIN_CHAT_ID` instead, so it's never exposed to channel members.
 

@@ -1702,6 +1702,88 @@ async def promo_renovacion_command(message: Message, settings: Settings, supabas
     await message.answer(f"Promo enviada a {sent}/{len(rows)} usuario(s) que vencen en los próximos 10 días.")
 
 
+BROADCAST_USAGE = (
+    "Uso: /broadcast <días> <mensaje>\n\n"
+    "Manda a todos los que estén activos y venzan dentro de esos días.\n"
+    "Opcional: adjunta una foto, video o nota de voz al mismo mensaje del comando "
+    "(como caption/descripción) para incluirla.\n"
+    "Para incluir una SEGUNDA foto/video/nota de voz: mándala primero sola, y luego "
+    "manda el comando (con o sin la primera adjunta) respondiendo (reply) a ese primer envío."
+)
+
+
+def _extract_media(message: Message | None) -> tuple[str, str] | None:
+    if not message:
+        return None
+    if message.photo:
+        return "photo", message.photo[-1].file_id
+    if message.video:
+        return "video", message.video.file_id
+    if message.voice:
+        return "voice", message.voice.file_id
+    return None
+
+
+async def _send_media(bot: Bot, chat_id: int, media_type: str, file_id: str, caption: str | None = None) -> None:
+    if media_type == "photo":
+        await bot.send_photo(chat_id, file_id, caption=caption)
+    elif media_type == "video":
+        await bot.send_video(chat_id, file_id, caption=caption)
+    elif media_type == "voice":
+        await bot.send_voice(chat_id, file_id, caption=caption)
+
+
+@router.message(F.text.regexp(r"(?i)^/broadcast(@\w+)?\b") | F.caption.regexp(r"(?i)^/broadcast(@\w+)?\b"))
+@router.channel_post(F.text.regexp(r"(?i)^/broadcast(@\w+)?\b") | F.caption.regexp(r"(?i)^/broadcast(@\w+)?\b"))
+async def broadcast_command(message: Message, settings: Settings, supabase: Client) -> None:
+    if not is_admin(message, settings):
+        await reject_non_admin(message)
+        return
+
+    raw = (message.text or message.caption or "").strip()
+    parts = raw.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(BROADCAST_USAGE)
+        return
+    try:
+        days = int(parts[1])
+    except ValueError:
+        await message.answer(BROADCAST_USAGE)
+        return
+    text = parts[2].strip()
+    if not text:
+        await message.answer(BROADCAST_USAGE)
+        return
+
+    primary_media = _extract_media(message)
+    secondary_media = _extract_media(message.reply_to_message)
+
+    rows = await asyncio.to_thread(active_users_expiring_within, supabase, days)
+    if not rows:
+        await message.answer(f"No hay nadie que venza en los próximos {days} días.")
+        return
+
+    sent = 0
+    for row in rows:
+        telegram_id = row.get("telegram_id")
+        if not telegram_id:
+            continue
+        try:
+            if primary_media:
+                media_type, file_id = primary_media
+                await _send_media(message.bot, telegram_id, media_type, file_id, caption=text)
+            else:
+                await message.bot.send_message(telegram_id, text)
+            if secondary_media:
+                media_type, file_id = secondary_media
+                await _send_media(message.bot, telegram_id, media_type, file_id)
+            sent += 1
+        except (TelegramBadRequest, TelegramForbiddenError):
+            logger.warning("Could not send broadcast to telegram_id=%s", telegram_id, exc_info=True)
+
+    await message.answer(f"Broadcast enviado a {sent}/{len(rows)} usuario(s) que vencen en los próximos {days} días.")
+
+
 @router.message(F.chat.type == "private", (F.photo | F.document))
 async def receive_payment_receipt(message: Message, settings: Settings, supabase: Client) -> None:
     if message.from_user and message.from_user.id in settings.admin_user_ids:
