@@ -256,9 +256,12 @@ The local web dashboard runs on `http://localhost:8080` unless `PORT` is set.
 /sync_schema
 /promo_renovacion
 /broadcast <días> <mensaje>
+/oferta_combo
 ```
 
 Only users listed in `ADMIN_USER_IDS` can run admin commands.
+
+`/oferta_combo` segments active Privé members by whether they already have Green Temptation and/or Orange Seduction (per `secondary_channel_invites`): members with neither get a "combo available" message, members with exactly one get a "complete your combo" message naming the missing channel, and members with both get nothing. Channel pair is hardcoded in `main.py` (`COMBO_CHANNEL_A_*` / `COMBO_CHANNEL_B_*`) — edit those constants to reuse it for a different pair.
 
 `/reject_all_pending` rejects every user currently in `payment_status = pending_review` (same effect as running `/reject <telegram_id>` on each one — each gets the standard rejection DM). Review with `/pending_payments` first; there's no undo.
 

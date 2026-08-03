@@ -1784,6 +1784,106 @@ async def broadcast_command(message: Message, settings: Settings, supabase: Clie
     await message.answer(f"Broadcast enviado a {sent}/{len(rows)} usuario(s) que vencen en los próximos {days} días.")
 
 
+COMBO_CHANNEL_A_CHAT_ID = -1004369087281
+COMBO_CHANNEL_A_NAME = "Green Temptation"
+COMBO_CHANNEL_B_CHAT_ID = -1003908781230
+COMBO_CHANNEL_B_NAME = "Orange Seduction"
+
+COMBO_MESSAGE_NEITHER = (
+    "🔥 COMBO especial disponible 🔥\n\n"
+    f"Tenemos un COMBO de {COMBO_CHANNEL_A_NAME} + {COMBO_CHANNEL_B_NAME} a precio especial. "
+    "Mándame mensaje aquí mismo para más detalles 💕"
+)
+
+
+def _combo_message_missing_one(missing_name: str) -> str:
+    return (
+        "🔥 Completa tu COMBO 🔥\n\n"
+        f"Adquiere {missing_name} a precio especial y completa el COMBO. "
+        "Mándame mensaje aquí mismo para adquirirlo 💕"
+    )
+
+
+def secondary_channel_recipients(supabase: Client, chat_id: int) -> set[int]:
+    try:
+        response = (
+            supabase.table("secondary_channel_invites")
+            .select("telegram_id")
+            .eq("chat_id", chat_id)
+            .execute()
+        )
+    except Exception:
+        logger.warning("Could not query secondary_channel_invites for chat_id=%s", chat_id, exc_info=True)
+        return set()
+    return {int(row["telegram_id"]) for row in (response.data or []) if row.get("telegram_id") is not None}
+
+
+@router.message(Command("oferta_combo"))
+@router.channel_post(Command("oferta_combo"))
+async def oferta_combo_command(message: Message, settings: Settings, supabase: Client) -> None:
+    """Segmenta a los miembros activos de Privé según si ya tienen Green Temptation
+    y/o Orange Seduction (via secondary_channel_invites) y les manda la oferta que
+    corresponda: combo completo a quien no tiene ninguno, o 'te falta X' a quien
+    ya tiene uno. A quien ya tiene ambos no se le manda nada."""
+    if not is_admin(message, settings):
+        await reject_non_admin(message)
+        return
+
+    try:
+        response = supabase.table("telegram_users").select("telegram_id").eq("status", "active").execute()
+    except Exception as exc:
+        logger.exception("Could not fetch active members for oferta_combo")
+        await message.answer(f"No pude consultar miembros activos: {exc}")
+        return
+
+    active_ids = [row["telegram_id"] for row in (response.data or []) if row.get("telegram_id")]
+    if not active_ids:
+        await message.answer("No hay miembros activos de Privé.")
+        return
+
+    channel_a_ids = await asyncio.to_thread(secondary_channel_recipients, supabase, COMBO_CHANNEL_A_CHAT_ID)
+    channel_b_ids = await asyncio.to_thread(secondary_channel_recipients, supabase, COMBO_CHANNEL_B_CHAT_ID)
+
+    sent_neither = 0
+    sent_missing_a = 0
+    sent_missing_b = 0
+    errors = 0
+    for telegram_id in active_ids:
+        has_a = telegram_id in channel_a_ids
+        has_b = telegram_id in channel_b_ids
+        if has_a and has_b:
+            continue  # ya tiene ambos, no aplica oferta
+        if not has_a and not has_b:
+            text = COMBO_MESSAGE_NEITHER
+        elif has_a:
+            text = _combo_message_missing_one(COMBO_CHANNEL_B_NAME)
+        else:
+            text = _combo_message_missing_one(COMBO_CHANNEL_A_NAME)
+
+        try:
+            await message.bot.send_message(telegram_id, text)
+        except (TelegramBadRequest, TelegramForbiddenError):
+            errors += 1
+            logger.warning("Could not send oferta_combo to telegram_id=%s", telegram_id, exc_info=True)
+            continue
+
+        if not has_a and not has_b:
+            sent_neither += 1
+        elif has_a:
+            sent_missing_b += 1
+        else:
+            sent_missing_a += 1
+
+    total_sent = sent_neither + sent_missing_a + sent_missing_b
+    await message.answer(
+        "Oferta combo enviada:\n"
+        f"- Sin ninguno de los dos (combo completo): {sent_neither}\n"
+        f"- Ya tienen {COMBO_CHANNEL_A_NAME}, les falta {COMBO_CHANNEL_B_NAME}: {sent_missing_b}\n"
+        f"- Ya tienen {COMBO_CHANNEL_B_NAME}, les falta {COMBO_CHANNEL_A_NAME}: {sent_missing_a}\n"
+        f"Total enviados: {total_sent}. Errores: {errors}."
+    )
+
+
 @router.message(F.chat.type == "private", (F.photo | F.document))
 async def receive_payment_receipt(message: Message, settings: Settings, supabase: Client) -> None:
     if message.from_user and message.from_user.id in settings.admin_user_ids:
