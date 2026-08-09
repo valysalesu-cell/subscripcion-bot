@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, ChatMemberUpdated, ErrorEvent, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -1598,6 +1598,61 @@ async def _report_chat_id(bot: Bot, settings: Settings, chat) -> None:
     label = chat.title or chat.type
     text = f"💬 Chat ID de <b>{label}</b> (tipo: {chat.type}): <code>{chat.id}</code>"
     await bot.send_message(settings.admin_chat_id, text, parse_mode="HTML")
+
+
+# Onyx cross-promotion (2026-08): a fan browsing Chivis's Onyx app taps a
+# promo card that deep-links here as t.me/<bot>?start=onyx. Telegram has no
+# way to pre-fill free text into a normal chat, so this payload is the
+# reliable, always-identical signal instead — it never depends on the fan
+# typing anything. Purely additive: registers the lead in telegram_users the
+# same way the existing CTA-button flow does (so it shows up in /users and
+# the dashboard normally), tagged distinctly via source/notes so it's
+# identifiable as Onyx-driven, then flags it to the admin. Doesn't touch
+# upsert_cta_user or any other existing registration path.
+@router.message(CommandStart(deep_link=True))
+async def onyx_referral_start(message: Message, command: CommandObject, settings: Settings, supabase: Client) -> None:
+    payload = (command.args or "").strip().lower()
+    if payload != "onyx":
+        return
+    if not message.from_user:
+        return
+
+    user = message.from_user
+    existing = get_registered_user(supabase, user.id)
+    joined_at = now_utc_iso()
+    onyx_payload = {
+        "telegram_id": user.id,
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "status": "active",
+        "payment_status": "unpaid",
+        "notes": "Llegó desde Onyx (promo de otro perfil)",
+        "source": "onyx_referral",
+    }
+    try:
+        if existing:
+            supabase.table("telegram_users").update(onyx_payload).eq("telegram_id", user.id).execute()
+        else:
+            membership_start_date = datetime.now(APP_TIMEZONE).date()
+            onyx_payload["registered_at"] = joined_at
+            onyx_payload["joined_at"] = joined_at
+            onyx_payload["membership_start_date"] = membership_start_date.isoformat()
+            onyx_payload["expiry_date"] = (membership_start_date + timedelta(days=30)).isoformat()
+            supabase.table("telegram_users").insert(onyx_payload).execute()
+    except Exception:
+        logger.exception("Could not register Onyx referral telegram_id=%s", user.id)
+
+    await message.answer(
+        "¡Hola! 😍 Vi que llegaste desde Onyx.\n\n"
+        "Gracias por el interés — en un momento te comparto los detalles para unirte 💕"
+    )
+
+    handle = f"@{user.username}" if user.username else "(sin username)"
+    await message.bot.send_message(
+        settings.admin_chat_id,
+        f"🔔 Nuevo lead desde Onyx\nTelegram ID: {user.id}\nUsuario: {handle}",
+    )
 
 
 @router.message(Command("chat_id"))
