@@ -445,6 +445,17 @@ def get_registered_user(supabase: Client, telegram_id: int) -> dict[str, Any] | 
     return response.data[0] if response.data else None
 
 
+def get_registered_users_by_username(supabase: Client, username: str) -> list[dict[str, Any]]:
+    clean = username.lstrip("@").strip()
+    response = (
+        supabase.table("telegram_users")
+        .select("*")
+        .ilike("username", clean)
+        .execute()
+    )
+    return response.data or []
+
+
 def get_user_by_invite_link_name(supabase: Client, invite_link_name: str) -> dict[str, Any] | None:
     response = (
         supabase.table("telegram_users")
@@ -2158,6 +2169,28 @@ async def user_record(message: Message, settings: Settings, supabase: Client) ->
         return
     row = await asyncio.to_thread(get_registered_user, supabase, telegram_id)
     await send_long_message(message, format_user_record(row or {}))
+
+
+@router.message(Command("buscar_usuario"))
+@router.channel_post(Command("buscar_usuario"))
+async def buscar_usuario_command(message: Message, settings: Settings, supabase: Client) -> None:
+    if not is_admin(message, settings):
+        await reject_non_admin(message)
+        return
+    parts = (message.text or message.caption or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        await message.answer("Uso: /buscar_usuario <username> (con o sin @)")
+        return
+    rows = await asyncio.to_thread(get_registered_users_by_username, supabase, parts[1].strip())
+    if not rows:
+        await message.answer("No encontré ningún usuario con ese username.")
+        return
+    if len(rows) == 1:
+        await send_long_message(message, format_user_record(rows[0]))
+        return
+    lines = [f"Encontré {len(rows)} coincidencias:"] + [format_user(row) for row in rows]
+    lines.append("\nUsa /user <telegram_id> con el ID exacto para ver el detalle completo de uno.")
+    await send_long_message(message, "\n".join(lines))
 
 
 @router.message(Command("payment_history"))
