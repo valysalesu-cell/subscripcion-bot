@@ -257,7 +257,9 @@ The local web dashboard runs on `http://localhost:8080` unless `PORT` is set.
 /sync_schema
 /promo_renovacion
 /broadcast <días> <mensaje>
+/broadcast todos <mensaje>
 /oferta_combo
+/contact_admin
 ```
 
 Only users listed in `ADMIN_USER_IDS` can run admin commands.
@@ -270,7 +272,9 @@ Only users listed in `ADMIN_USER_IDS` can run admin commands.
 
 `/send_invite <telegram_id>` only touches the invite-link fields (generates a fresh one-use link and DMs it) — it never changes `expiry_date`, `status`, or `payment_status`. Safe to use to re-send access to someone whose subscription is still valid but who left/was removed from the channel for some other reason.
 
-`/broadcast <días> <mensaje>` DMs every active user whose `expiry_date` falls within the given number of days from today, with a custom message — no code change needed for future promos. Attach a photo/video/voice note to the same message (as its caption) to include it. To include a *second* photo/video/voice note, send it first on its own, then send the `/broadcast ...` command as a reply to that message. `/promo_renovacion` is the older fixed-text, no-media, 10-day version kept for convenience.
+`/broadcast <días> <mensaje>` DMs every active user whose `expiry_date` falls within the given number of days from today, with a custom message — no code change needed for future promos. Use `/broadcast todos <mensaje>` instead of a day count to reach everyone who has ever joined the Privé channel (`joined_channel_at is not null`), regardless of current status. Attach a photo/video/voice note to the same message (as its caption) to include it. To include a *second* photo/video/voice note, send it first on its own, then send the `/broadcast ...` command as a reply to that message. `/promo_renovacion` is the older fixed-text, no-media, 10-day version kept for convenience.
+
+`/contact_admin` is the only public (non-admin) command — any subscriber can run it. Replies with a fixed "contact @marissazuv" message. Edit `CONTACT_ADMIN_MESSAGE` in `main.py` to change the text or the admin's username.
 
 `/chat_id` in a private chat replies with your own `telegram_user_id`. Used inside a group/channel (including a direct channel post, where the bot is admin), it does not reply there — it sends the chat_id to `ADMIN_CHAT_ID` instead, so it's never exposed to channel members.
 

@@ -1769,13 +1769,26 @@ async def promo_renovacion_command(message: Message, settings: Settings, supabas
 
 
 BROADCAST_USAGE = (
-    "Uso: /broadcast <días> <mensaje>\n\n"
-    "Manda a todos los que estén activos y venzan dentro de esos días.\n"
+    "Uso: /broadcast <días> <mensaje>\n"
+    "O:   /broadcast todos <mensaje>\n\n"
+    "Con <días>: manda a todos los que estén activos y venzan dentro de esos días.\n"
+    "Con 'todos': manda a cualquiera que alguna vez haya entrado al canal de Privé "
+    "(sin importar si sigue activo).\n"
     "Opcional: adjunta una foto, video o nota de voz al mismo mensaje del comando "
     "(como caption/descripción) para incluirla.\n"
     "Para incluir una SEGUNDA foto/video/nota de voz: mándala primero sola, y luego "
     "manda el comando (con o sin la primera adjunta) respondiendo (reply) a ese primer envío."
 )
+
+
+def all_users_who_joined_group(supabase: Client) -> list[dict[str, Any]]:
+    response = (
+        supabase.table("telegram_users")
+        .select("*")
+        .not_.is_("joined_channel_at", "null")
+        .execute()
+    )
+    return response.data or []
 
 
 def _extract_media(message: Message | None) -> tuple[str, str] | None:
@@ -1811,11 +1824,20 @@ async def broadcast_command(message: Message, settings: Settings, supabase: Clie
     if len(parts) < 3:
         await message.answer(BROADCAST_USAGE)
         return
-    try:
-        days = int(parts[1])
-    except ValueError:
-        await message.answer(BROADCAST_USAGE)
-        return
+
+    scope_arg = parts[1].strip().lower()
+    if scope_arg in ("todos", "all"):
+        rows = await asyncio.to_thread(all_users_who_joined_group, supabase)
+        scope_label = "que han entrado al grupo Privé"
+    else:
+        try:
+            days = int(parts[1])
+        except ValueError:
+            await message.answer(BROADCAST_USAGE)
+            return
+        rows = await asyncio.to_thread(active_users_expiring_within, supabase, days)
+        scope_label = f"que vencen en los próximos {days} días"
+
     text = parts[2].strip()
     if not text:
         await message.answer(BROADCAST_USAGE)
@@ -1824,9 +1846,8 @@ async def broadcast_command(message: Message, settings: Settings, supabase: Clie
     primary_media = _extract_media(message)
     secondary_media = _extract_media(message.reply_to_message)
 
-    rows = await asyncio.to_thread(active_users_expiring_within, supabase, days)
     if not rows:
-        await message.answer(f"No hay nadie que venza en los próximos {days} días.")
+        await message.answer(f"No hay nadie {scope_label}.")
         return
 
     sent = 0
@@ -1847,7 +1868,7 @@ async def broadcast_command(message: Message, settings: Settings, supabase: Clie
         except (TelegramBadRequest, TelegramForbiddenError):
             logger.warning("Could not send broadcast to telegram_id=%s", telegram_id, exc_info=True)
 
-    await message.answer(f"Broadcast enviado a {sent}/{len(rows)} usuario(s) que vencen en los próximos {days} días.")
+    await message.answer(f"Broadcast enviado a {sent}/{len(rows)} usuario(s) {scope_label}.")
 
 
 COMBO_CHANNEL_A_CHAT_ID = -1004369087281
@@ -1948,6 +1969,15 @@ async def oferta_combo_command(message: Message, settings: Settings, supabase: C
         f"- Ya tienen {COMBO_CHANNEL_B_NAME}, les falta {COMBO_CHANNEL_A_NAME}: {sent_missing_a}\n"
         f"Total enviados: {total_sent}. Errores: {errors}."
     )
+
+
+CONTACT_ADMIN_MESSAGE = "Por favor contacta a @marissazuv 💕"
+
+
+@router.message(Command("contact_admin"))
+async def contact_admin_command(message: Message) -> None:
+    """Comando público — cualquier suscriptor puede usarlo, no requiere ser admin."""
+    await message.answer(CONTACT_ADMIN_MESSAGE)
 
 
 @router.message(F.chat.type == "private", (F.photo | F.document))
