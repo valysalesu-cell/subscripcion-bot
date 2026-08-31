@@ -150,6 +150,11 @@ create index if not exists secondary_channel_invites_telegram_id_idx
   on public.secondary_channel_invites (telegram_id);
 create index if not exists secondary_channel_invites_chat_id_idx
   on public.secondary_channel_invites (chat_id);
+create table if not exists public.blacklist (
+  telegram_id bigint primary key,
+  reason text,
+  blocked_at timestamptz default now()
+);
 """.strip()
 
 logger = logging.getLogger(__name__)
@@ -301,6 +306,60 @@ def is_admin_id(user_id: int | None, settings: Settings) -> bool:
 
 async def reject_non_admin(message: Message) -> None:
     await message.answer("No autorizado.")
+
+
+def is_blacklisted(supabase: Client, telegram_id: int) -> bool:
+    try:
+        response = (
+            supabase.table("blacklist")
+            .select("telegram_id")
+            .eq("telegram_id", telegram_id)
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data)
+    except Exception:
+        logger.warning("Could not check blacklist telegram_id=%s", telegram_id, exc_info=True)
+        return False
+
+
+def get_blacklisted_telegram_ids(supabase: Client, telegram_ids: list[int]) -> set[int]:
+    """Bulk version of is_blacklisted, used to filter a batch of fans before a
+    scheduled/proactive DM instead of querying once per id."""
+    if not telegram_ids:
+        return set()
+    try:
+        response = (
+            supabase.table("blacklist")
+            .select("telegram_id")
+            .in_("telegram_id", telegram_ids)
+            .execute()
+        )
+        return {row["telegram_id"] for row in (response.data or [])}
+    except Exception:
+        logger.warning("Could not bulk-check blacklist for %d ids", len(telegram_ids), exc_info=True)
+        return set()
+
+
+def should_ignore_blacklisted(supabase: Client, settings: Settings, telegram_id: int) -> bool:
+    if telegram_id in settings.admin_user_ids:
+        return False
+    return is_blacklisted(supabase, telegram_id)
+
+
+class BlacklistMiddleware:
+    """Silencio total: si el telegram_id está en blacklist, el update ni
+    siquiera llega a un handler — no hay respuesta de ningún tipo. Solo
+    ignora, nunca expulsa ni revoca nada (eso se maneja aparte, a mano)."""
+
+    async def __call__(self, handler: Any, event: Any, data: dict[str, Any]) -> Any:
+        user = getattr(event, "from_user", None)
+        settings = data.get("settings")
+        supabase = data.get("supabase")
+        if user and settings and supabase:
+            if await asyncio.to_thread(should_ignore_blacklisted, supabase, settings, user.id):
+                return None
+        return await handler(event, data)
 
 
 def today_iso() -> str:
@@ -2201,6 +2260,59 @@ async def user_record(message: Message, settings: Settings, supabase: Client) ->
     await send_long_message(message, format_user_record(row or {}))
 
 
+@router.message(Command("blacklist"))
+@router.channel_post(Command("blacklist"))
+async def blacklist_user(message: Message, settings: Settings, supabase: Client) -> None:
+    if not is_admin(message, settings):
+        await reject_non_admin(message)
+        return
+    parts = (message.text or message.caption or "").split(maxsplit=2)
+    if len(parts) < 2:
+        await message.answer("Uso: /blacklist <telegram_id> [motivo]")
+        return
+    try:
+        telegram_id = int(parts[1])
+    except ValueError:
+        await message.answer("Uso: /blacklist <telegram_id> [motivo]")
+        return
+    motivo = parts[2] if len(parts) > 2 else None
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table("blacklist")
+            .upsert({"telegram_id": telegram_id, "reason": motivo}, on_conflict="telegram_id")
+            .execute()
+        )
+    except Exception as exc:
+        logger.exception("Could not blacklist telegram_id=%s", telegram_id)
+        await message.answer(f"No pude bloquear usuario: {exc}")
+        return
+    # A propósito: solo ignora (el bot deja de mandarle/responderle nada),
+    # no expulsa de ningún canal ni revoca links — eso se maneja aparte si
+    # hace falta.
+    await message.answer(f"Usuario {telegram_id} agregado a blacklist ✅ (solo se le ignora, no se le expulsó de nada)")
+
+
+@router.message(Command("quitar_blacklist"))
+@router.channel_post(Command("quitar_blacklist"))
+async def blacklist_remove(message: Message, settings: Settings, supabase: Client) -> None:
+    if not is_admin(message, settings):
+        await reject_non_admin(message)
+        return
+    telegram_id = command_telegram_id(message)
+    if telegram_id is None:
+        await message.answer("Uso: /quitar_blacklist <telegram_id>")
+        return
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table("blacklist").delete().eq("telegram_id", telegram_id).execute()
+        )
+    except Exception as exc:
+        logger.exception("Could not remove telegram_id=%s from blacklist", telegram_id)
+        await message.answer(f"No pude quitarlo de blacklist: {exc}")
+        return
+    await message.answer(f"Usuario {telegram_id} removido de blacklist ✅")
+
+
 @router.message(Command("buscar_usuario"))
 @router.channel_post(Command("buscar_usuario"))
 async def buscar_usuario_command(message: Message, settings: Settings, supabase: Client) -> None:
@@ -2766,10 +2878,13 @@ async def notify_expiring_today(bot: Bot, supabase: Client, settings: Settings) 
                 sections.extend(format_user(row) for row in rows)
 
                 reminder_text = renewal_reminder_message(target)
+                blacklisted = await asyncio.to_thread(
+                    get_blacklisted_telegram_ids, supabase, [r["telegram_id"] for r in rows if r.get("telegram_id")]
+                )
                 dm_sent = 0
                 for row in rows:
                     telegram_id = row.get("telegram_id")
-                    if not telegram_id:
+                    if not telegram_id or telegram_id in blacklisted:
                         continue
                     try:
                         await bot.send_message(telegram_id, reminder_text)
@@ -2819,6 +2934,9 @@ async def notify_expiring_today(bot: Bot, supabase: Client, settings: Settings) 
 
 async def run_telegram_bot(bot: Bot, supabase: Client, settings: Settings) -> None:
     dp = Dispatcher()
+    blacklist_middleware = BlacklistMiddleware()
+    dp.message.outer_middleware(blacklist_middleware)
+    dp.callback_query.outer_middleware(blacklist_middleware)
     dp.include_router(router)
 
     scheduler = AsyncIOScheduler(timezone=APP_TIMEZONE)
