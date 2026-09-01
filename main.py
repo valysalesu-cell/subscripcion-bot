@@ -184,6 +184,7 @@ SECONDARY_CHANNELS: list[dict[str, Any]] = [
     {"chat_id": -1003545835165, "name": "BLUE VELVET 💙✨"},
     {"chat_id": -1003994786056, "name": "Old West"},
     {"chat_id": -1003932329117, "name": "La consentida del profesor"},
+    {"chat_id": -1003982264463, "name": "Dirty Pink"},
 ]
 
 
