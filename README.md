@@ -245,7 +245,7 @@ The local web dashboard runs on `http://localhost:8080` unless `PORT` is set.
 /revoke_user <telegram_id>
 /revoke_link <invite_link_name>
 /approve <telegram_id>
-/reject <telegram_id>
+/reject <telegram_id> [silencioso]
 /ask_receipt <telegram_id>
 /set_expiry <telegram_id> <YYYY-MM-DD>
 /expired
@@ -267,6 +267,8 @@ Only users listed in `ADMIN_USER_IDS` can run admin commands.
 `/oferta_combo` segments active Privé members by whether they already have Green Temptation and/or Orange Seduction (per `secondary_channel_invites`): members with neither get a "combo available" message, members with exactly one get a "complete your combo" message naming the missing channel, and members with both get nothing. Channel pair is hardcoded in `main.py` (`COMBO_CHANNEL_A_*` / `COMBO_CHANNEL_B_*`) — edit those constants to reuse it for a different pair.
 
 `/reject_all_pending` rejects every user currently in `payment_status = pending_review` (same effect as running `/reject <telegram_id>` on each one — each gets the standard rejection DM). Review with `/pending_payments` first; there's no undo.
+
+`/reject <telegram_id> silencioso` (or `silent`) clears a stuck pending payment the same way as `/reject`, but skips the "tu comprobante no pudo ser validado" DM to the user. Use it when the payment is being cleared for administrative reasons (not because it was actually invalid) — e.g. right before manually sending them the invite with `/send_invite`.
 
 `/buscar_usuario <username>` looks a user up by Telegram `@username` (with or without the `@`) instead of `telegram_id` — handy when that's all you have. Shows the full record directly if there's exactly one match, otherwise a short list to pick from.
 

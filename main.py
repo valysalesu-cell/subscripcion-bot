@@ -1332,6 +1332,7 @@ async def reject_payment(
     settings: Settings,
     telegram_id: int,
     admin_id: int | None = None,
+    notify: bool = True,
 ) -> None:
     await asyncio.to_thread(
         upsert_user_payload,
@@ -1344,15 +1345,16 @@ async def reject_payment(
             "notes": "Payment rejected by admin",
         },
     )
-    try:
-        await bot.send_message(
-            telegram_id,
-            "Tu comprobante no pudo ser validado. Revisa la información y vuelve a intentarlo.",
-        )
-    except (TelegramBadRequest, TelegramForbiddenError):
-        logger.warning("Could not DM rejection to telegram_id=%s", telegram_id, exc_info=True)
+    if notify:
+        try:
+            await bot.send_message(
+                telegram_id,
+                "Tu comprobante no pudo ser validado. Revisa la información y vuelve a intentarlo.",
+            )
+        except (TelegramBadRequest, TelegramForbiddenError):
+            logger.warning("Could not DM rejection to telegram_id=%s", telegram_id, exc_info=True)
     await bot.send_message(settings.admin_chat_id, f"Comprobante rechazado para {telegram_id}")
-    logger.info("Payment rejected telegram_id=%s", telegram_id)
+    logger.info("Payment rejected telegram_id=%s notify=%s", telegram_id, notify)
 
 
 async def ask_new_receipt(
@@ -2492,12 +2494,28 @@ async def reject_command(message: Message, settings: Settings, supabase: Client)
     if not is_admin(message, settings):
         await reject_non_admin(message)
         return
-    telegram_id = command_telegram_id(message)
-    if telegram_id is None:
-        await message.answer("Uso: /reject <telegram_id>")
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        await message.answer("Uso: /reject <telegram_id> [silencioso]")
         return
-    await reject_payment(message.bot, supabase, settings, telegram_id, message.from_user.id if message.from_user else None)
-    await message.answer(f"Pago rechazado para {telegram_id}.")
+    try:
+        telegram_id = int(parts[1])
+    except ValueError:
+        await message.answer("Uso: /reject <telegram_id> [silencioso]")
+        return
+    notify = not (len(parts) >= 3 and parts[2].strip().lower() in ("silencioso", "silent"))
+    await reject_payment(
+        message.bot,
+        supabase,
+        settings,
+        telegram_id,
+        message.from_user.id if message.from_user else None,
+        notify=notify,
+    )
+    if notify:
+        await message.answer(f"Pago rechazado para {telegram_id}.")
+    else:
+        await message.answer(f"Pago rechazado para {telegram_id} (sin avisarle al usuario).")
 
 
 @router.message(Command("ask_receipt"))
